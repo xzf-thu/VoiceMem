@@ -75,9 +75,14 @@ _EMOTION_KEYWORDS: list[tuple[str, str]] = [
     ("恐惧", "焦虑"), ("害怕", "焦虑"), ("不安", "焦虑"), ("慌", "焦虑"),
     # 悲伤系
     ("悲伤", "悲伤"), ("难过", "悲伤"), ("失落", "悲伤"), ("沮丧", "悲伤"),
-    ("伤心", "悲伤"), ("绝望", "悲伤"), ("崩溃", "悲伤"),
+    ("伤心", "悲伤"), ("绝望", "悲伤"), ("崩溃", "悲伤"), ("难受", "悲伤"),
     # 委屈系
+    # "生气/火大/烦躁" 以前一个都不在表里，而"压力"在焦虑系——于是"我好生气啊，
+    # 我的老板老压力我"被判成【焦虑】，明说了生气却认不出。表是按顺序匹配的，
+    # 所以这几个要排在"压力"之类的泛词之前才盖得住（见下面 _EMOTION_KEYWORDS
+    # 的用法）。
     ("委屈", "委屈"), ("愤怒", "委屈"), ("气愤", "委屈"), ("不满", "委屈"),
+    ("生气", "委屈"), ("火大", "委屈"), ("恼火", "委屈"), ("烦躁", "委屈"),
     ("憋屈", "委屈"), ("不公平", "委屈"),
     # 孤独系
     ("孤独", "孤独"), ("空虚", "孤独"), ("寂寞", "孤独"),
@@ -151,9 +156,17 @@ def normalize_emotion_strict(emotion: str) -> str | None:
         return None
     if e in _CANONICAL_EMOTIONS:
         return e
+    # 按**词在句子里出现的位置**取最早的那个，不按表的顺序。
+    # 表的顺序是分组写的（焦虑系在前、委屈系在后），照表序匹配的话
+    # 「我好生气啊，我的老板老压力我」会先撞上"压力"→【焦虑】，而人开口第一个词
+    # 就是"生气"。人说话时最先说出来的情绪词通常就是主情绪。
+    best = None
     for keyword, canonical in _EMOTION_KEYWORDS:
-        if keyword in e:
-            return canonical
+        i = e.find(keyword)
+        if i >= 0 and (best is None or i < best[0]):
+            best = (i, canonical)
+    if best is not None:
+        return best[1]
     for pattern, canonical in _EN_KEYWORD_RE:
         if pattern.search(e):
             return canonical

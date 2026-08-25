@@ -13,7 +13,7 @@ def default_utils(base_url, memory_root):
         from voicemem.leftbrain.local_memory_store import OpenAILocalEmbedder, OpenAILocalEmbedderConfig
         return OpenAILocalEmbedder(OpenAILocalEmbedderConfig(base_url=base_url))
     def schema():
-        # 默认本地 E5 分类器：0 LLM、0 网络——投机预取那 0–500ms 预算里不能走网络，
+        # 默认本地 E5 分类器：0 LLM、0 网络——投机预取那 0–300ms 预算里不能走网络，
         # 而 Classify 就在那条路上（voicemem/stream.py 的 _speculate）。
         # sentence-transformers 不在基础依赖里（随 [demo] extra 装），缺了就回落到
         # LLM 版并打一行说明——静默回落等于悄悄开始花钱。

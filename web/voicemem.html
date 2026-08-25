@@ -794,7 +794,10 @@ return {
   highlight(ids){ for(const n of N) n.hit=0; for(const i of ids) if(N[i]) N[i].hit=1; },
   beam(from,to){ BEAM=[]; for(const a of from) for(const b of to) if(N[a]&&N[b]) BEAM.push({a:a,b:b});
                  if(BEAM.length) PULSE.t=-PULSE.trail; },
-  clear(){ for(const n of N){ n.hit=0; n.act=0; } BEAM=[]; }
+  clear(){ for(const n of N){ n.hit=0; n.act=0; } BEAM=[]; },
+  // 调试用：把节点坐标倒出来（控制台 VMBrain.__dump()）
+  __dump(){ return N.map(n=>({id:n.id,side:n.side,kind:n.kind,cluster:n.cluster,
+                              w:n.w,x:n.x,y:n.y,sx:n.sx,sy:n.sy})); }
 };
 })();
 </script>
@@ -1024,15 +1027,35 @@ function buildGraph(sid){
     for(let i=0;i<g.length;i++) for(let j=i+1;j<g.length;j++)
       window.VMBrain.link(g[i],g[j],'rel',.28); }
   sp.right.forEach(m=>{
+    // full 优先用实体描述（后端归纳出来的一句话），没有就退回标题本身——
+    // 演示数据没有 desc，两边照样走同一条路。
     m.node=window.VMBrain.add('R',CLUSTER_KIND[m.cluster]||'exper',trunc(m.text),m.cluster,
-      {full:m.text, notes:m.notes||[], src:m.src||''});
+      {full:m.desc||m.text, notes:m.notes||[], src:m.src||''});
   });
   window.VMBrain.clear();
 }
 
 /* ── 渲染 ─────────────────────────────────────────────────────────── */
 function renderSpaces(){
-  const ul=$('spaceList'); ul.innerHTML='';
+  // 侧栏的空间列表已经换成右上角那个徽章（#spaceBadgeName）。旧结构还在就照旧
+  // 渲染，不在就只更新徽章——JS 里硬取 $('spaceList') 会在这里抛错，脚本一断，
+  // 后面所有监听（含「开始对话」）都挂不上，表现就是按钮点了没反应。
+  const badge=$('spaceBadgeName');
+  if(badge){
+    // 带上节点数：脑图空白时一眼看出是「没拉到记忆」还是「拉到了但没画出来」。
+    // 原来这个数字写在 #brainSpace 上，而那个元素在当前这版 HTML 里不存在。
+    const sp=SPACES[activeSpace];
+    badge.textContent=sp.name+'（左'+sp.left.length+'/右'+sp.right.length+'）';
+  }
+  const brain=$('brainSpace');
+  if(brain){
+    const sp=SPACES[activeSpace];
+    brain.textContent='Memory Space · '+sp.name+
+      '（左'+sp.left.length+' / 右'+sp.right.length+'）';
+  }
+  const ul=$('spaceList');
+  if(!ul) return;
+  ul.innerHTML='';
   for(const sid of SPACE_IDS){
     const sp=SPACES[sid], li=document.createElement('li');
     if(sid===activeSpace) li.className='on';
@@ -1042,7 +1065,6 @@ function renderSpaces(){
       ' 条画像 · '+spaceSessions(sid).length+' 个对话</span></span>';
     ul.appendChild(li);
   }
-  $('brainSpace').textContent='Memory Space · '+SPACES[activeSpace].name;
 }
 function renderSessions(){
   const ul=$('sessList'); ul.innerHTML='';
@@ -1069,7 +1091,8 @@ function renderSessions(){
 function renderChat(){
   const s=currentSession();
   $('chatTitle').textContent=s?s.title:'新对话';
-  $('chatSpaceName').textContent=SPACES[s?s.space:activeSpace].name;
+  const csn=$('chatSpaceName');
+  if(csn) csn.textContent=SPACES[s?s.space:activeSpace].name;
   const box=$('chatLog'); box.innerHTML='';
   if(!s||!s.turns.length){
     const e=document.createElement('div'); e.className='empty';
@@ -1115,8 +1138,15 @@ function renderIO(s){
 }
 function renderRecall(side,items){
   const ul=$(side==='r'?'recallR':'recallL'); ul.innerHTML='';
-  if(!items.length){ const li=document.createElement('li'); li.className='none';
-    li.textContent='等待检索…'; ul.appendChild(li); return; }
+  if(!items.length){
+    const li=document.createElement('li'); li.className='none';
+    // 空着的原因有好几种，写死一句「等待检索…」就分不出是哪种，只能猜。
+    li.textContent = !live ? '未连接后端（点「开始对话」）'
+      : (LAST_HITS.at===0 ? '等待检索…'
+      : (side==='r' && LAST_HITS.rAll>0 ? '本轮右脑命中 '+LAST_HITS.rAll+' 条，全是内部笔记'
+      : '本轮无命中'));
+    ul.appendChild(li); return;
+  }
   for(const it of items){
     const li=document.createElement('li');
     const a=document.createElement('span'); a.textContent=it.text;
@@ -1140,7 +1170,7 @@ $('btnSearch').addEventListener('click',()=>{
   if(open) $('searchIn').focus(); else { $('searchIn').value=''; searchQ=''; renderSessions(); }
 });
 $('searchIn').addEventListener('input',e=>{ searchQ=e.target.value; renderSessions(); });
-$('spaceList').addEventListener('click',e=>{
+if($('spaceList')) $('spaceList').addEventListener('click',e=>{
   const li=e.target.closest('li[data-space]'); if(li) switchSpace(li.dataset.space);
 });
 $('sessList').addEventListener('click',e=>{
@@ -1433,6 +1463,7 @@ function playPcm(buf){
 }
 function stopPlayback(){
   for(const s of scheduled.splice(0)){ try{ s.stop(); }catch(e){} }
+  releaseMic();                 // 回放被打断，麦克风不该还被挂着
   if(playCtx) nextPlay=playCtx.currentTime;
 }
 
@@ -1457,7 +1488,7 @@ async function startMic(){
   const src=micCtx.createMediaStreamSource(micStream);
   micProc=micCtx.createScriptProcessor(4096,1,1);
   micProc.onaudioprocess=e=>{
-    if(!ws||ws.readyState!==1||paused) return;
+    if(!ws||ws.readyState!==1||paused||replaying) return;
     const f32=e.inputBuffer.getChannelData(0);
     let peak=0; for(let i=0;i<f32.length;i++){ const v=Math.abs(f32[i]); if(v>peak) peak=v; }
     lvOn=peak>0.02;
@@ -1490,17 +1521,79 @@ async function loadMemories(){
     m=await r.json();
   }catch(e){ return; }
   const sp=SPACES[LIVE];
+
+  // 记下刷新前每个节点挂着几条 note。一句新话多半是挂到**已有**节点下面
+  // （比如又一条「焦虑」），节点数不变，图上什么都看不出来——所以这里 diff
+  // 一下，谁多了 note 就让谁亮一下，用户才知道刚说的那句进去了。
+  const before={};
+  for(const x of sp.left)  before['L:'+x.text]=1;
+  for(const x of sp.right) before['R:'+x.text]=(x.notes||[]).length;
+
+  // 形状跟上面 SPACES 里那份演示数据**逐字段对齐**，脑图和卡片只认一种结构：
+  //   左脑 {text, slot, ents}
+  //   右脑 {text, cluster, src, desc, notes:[{text, emotion, cause}]}
+  // src 写成「情感记录 ×4」——演示数据就是这个样子，卡片底部直接显示。
   sp.left=(m.left||[]).map(x=>({text:x.text,slot:x.slot||'daily_life',ents:x.entities||[]}));
-  sp.right=(m.right||[]).map(x=>({text:x.text,cluster:x.cluster||'experiences',
-                                  src:x.slot||'',notes:x.notes||[]}));
-  if(activeSpace===LIVE){ buildGraph(LIVE); renderAll(); }
+  sp.right=(m.right||[]).map(x=>{
+    const notes=x.notes||[];
+    const src=(x.slot||'')+(notes.length?' ×'+notes.length:'');
+    // 脑图右半球只有三个锚点（RIGHT_SLOTS: emotion/personality/preference）。
+    // 后端用的词是 experiences（应对方式/表达风格/人物地点态度那几个 slot），
+    // 没有对应锚点 → labelOf() 返回 -1 → 节点无处安放，实测 28 个里 12 个
+    // 就这么消失了。在边界上对齐成 UI 的三类。
+    let cl=x.cluster||'personality';
+    if(cl!=='emotion'&&cl!=='preference') cl='personality';
+    return {text:x.text,cluster:cl,src:src,desc:x.desc||'',notes:notes};
+  });
+
+  const grew=[];
+  sp.left.forEach((x,i)=>{ if(!before['L:'+x.text]) grew.push(['L',i]); });
+
+  // 标签栏的实体：memory_hits 是在回复**之前**发的，那会儿这句话还没被抽取，
+  // 只能给个 0 成本的近似（后端从命中记忆里挑这句话提到过的）。真正的实体是跟
+  // 抽 fact / 定 slot 同一次 LLM 调用出来的，随新记忆一起落库——这里拿到就替换。
+  const fresh=grew.filter(g=>g[0]==='L').map(g=>sp.left[g[1]]);
+  if(fresh.length){
+    const ents=[];
+    fresh.forEach(x=>(x.ents||[]).forEach(e=>{ if(e&&ents.indexOf(e)<0) ents.push(e); }));
+    // 只写回**发起这次轮询的那一轮**。不加这个判断的话，上一轮的轮询在你已经
+    // 说了下一句之后才回来，会把上一句的实体贴到这一句的标签栏上——看起来就是
+    // 「这轮没有实体就停留在上一轮」。
+    const cur=currentSession();
+    if(cur&&ents.length&&watchTurn===turnSeq){
+      cur.ui.tags.ent=ents.slice(0,6).join('、'); paint(cur);
+    }
+  }
+  sp.right.forEach((x,i)=>{
+    const was=before['R:'+x.text];
+    if(was===undefined || (x.notes||[]).length>was) grew.push(['R',i]);
+  });
+
+  if(activeSpace!==LIVE){
+    console.log('[vm] loadMemories: 当前空间是 '+activeSpace+'，不是 live，跳过重建脑图');
+    return;
+  }
+  console.log('[vm] loadMemories: 左'+sp.left.length+' 右'+sp.right.length+' 条 → 重建脑图');
+  buildGraph(LIVE); renderAll();
+
+  // buildGraph 之后节点下标才有效
+  const ids=[];
+  for(const [side,i] of grew){
+    const item=(side==='L'?sp.left:sp.right)[i];
+    if(item && item.node!==undefined) ids.push(item.node);
+  }
+  if(ids.length){
+    window.VMBrain.highlight(ids);
+    setTimeout(()=>window.VMBrain.clear(), 2600);
+  }
 }
 
 /* 后端发来的一条命中，对应脑图上哪个节点。
    左脑按记忆原文找；右脑发的是 heartnote 的内容，而节点是实体，
    所以要去实体的 notes 里找哪一条包含它。 */
 function leftNodesOf(hits){
-  const sp=SPACES[LIVE], out=[];
+  const sp=SPACES[LIVE]; if(!sp) return [];
+  const out=[];
   for(const h of hits){
     const i=sp.left.findIndex(m=>m.text===h.text);
     if(i>=0&&sp.left[i].node!==undefined) out.push(sp.left[i].node);
@@ -1517,19 +1610,37 @@ function bareNote(s){
     .trim();
 }
 function rightNodesOf(hits){
-  const sp=SPACES[LIVE], out=[];
+  const sp=SPACES[LIVE]; if(!sp) return [];
+  const out=[];
   for(const h of hits){
-    const c=bareNote(h.content);
+    const c=bareNote(h.raw||h.content);   // raw 是带前缀的原文，note 就是按它存的
     if(!c) continue;
-    let i=sp.right.findIndex(m=>(m.notes||[]).some(n=>{
-      const t=bareNote(n.text);
-      return t&&(t===c||t.indexOf(c)>=0||c.indexOf(t)>=0);
-    }));
+    // 一条记忆常常同时挂在好几个节点下：既挂在「压力大时想被安抚」这种具体的
+    // 特质上，也挂在「Jiaqi」那个什么都装的人物节点上（实测 52 条 note）。
+    // 挑 note 最少的——note 越少越具体，射线指过去才有信息量。
+    const cands=[];
+    sp.right.forEach((m,k)=>{
+      if((m.notes||[]).some(n=>{
+        const t=bareNote(n.text);
+        return t&&(t===c||t.indexOf(c)>=0||c.indexOf(t)>=0);
+      })) cands.push(k);
+    });
+    cands.sort((a,b)=>(sp.right[a].notes||[]).length-(sp.right[b].notes||[]).length);
+    let i = cands.length ? cands[0] : -1;
     // 没挂到具体 note 的（比如 response_experience 根本不在快照里），
     // 退一步按实体名 / 描述里是否提到来找
     if(i<0) i=sp.right.findIndex(m=>m.text&&c.indexOf(m.text)>=0);
-    if(i>=0&&sp.right[i].node!==undefined&&out.indexOf(sp.right[i].node)<0)
-      out.push(sp.right[i].node);
+    if(i>=0&&sp.right[i].node!==undefined&&out.indexOf(sp.right[i].node)<0){
+      out.push(sp.right[i].node); continue;
+    }
+    // profile 命中是 slot 级的（"喜好与厌恶：…"），没有对应的实体节点。
+    // 亮这个 slot 下的节点——那正是这条画像归纳自的那些。
+    if(h.slot){
+      sp.right.forEach(m=>{
+        if(m.node!==undefined && (m.src||'').indexOf(h.slot)===0
+           && out.indexOf(m.node)<0) out.push(m.node);
+      });
+    }
   }
   return out;
 }
@@ -1537,7 +1648,9 @@ function rightNodesOf(hits){
 /* --- 消息处理 ------------------------------------------------------ */
 let liveReply='';
 function handle(m){
-  const s=currentSession(); if(!s) return;
+  if(window.VM_DEBUG) console.log('[vm]', m.type, m);
+  const s=currentSession();
+  if(!s){ console.warn('[vm] 收到 '+m.type+' 但当前没有会话，丢弃'); return; }
   switch(m.type){
     case 'session_ready':
       toast('已连上后端（'+(m.mode||'')+'），模拟输入自动停止。'); break;
@@ -1555,9 +1668,16 @@ function handle(m){
                  ent:(m.entities||[]).join('、'),
                  sch:(m.slots||[]).join('、')};
       s.ui.recallL=L.map(h=>({text:trunc(h.text),score:Number(h.score||0).toFixed(2)}));
-      s.ui.recallR=R.map(h=>({text:trunc(h.content),score:Number(h.priority||0).toFixed(2)}));
+      s.ui.recallR=R.filter(h=>!h.internal)
+                    .map(h=>({text:trunc(h.content),score:Number(h.priority||0).toFixed(2)}));
       paint(s);
+      LAST_HITS={at:Date.now(), l:L.length, rAll:R.length,
+                 r:R.filter(h=>!h.internal).length};
       const li=leftNodesOf(L), ri=rightNodesOf(R);
+      const sp=SPACES[LIVE];
+      console.log('[vm] 脑图: 空间里 左'+(sp?sp.left.length:'?')+'/右'+(sp?sp.right.length:'?')+
+                  ' 节点；本轮命中 左'+li.length+'/右'+ri.length+
+                  (ri.length?'':'  ← 右脑没有可亮的节点'));
       window.VMBrain.highlight(li.concat(ri));
       window.VMBrain.beam(li,ri);
       break;
@@ -1575,8 +1695,11 @@ function handle(m){
       if(liveReply) addTurn(s,'ai',liveReply);
       liveReply='';
       titleFor(s);
-      // 事实是后台抽的（async_facts），立刻拉快照多半还没写进去
-      setTimeout(loadMemories,2500);
+      // 事实和图谱是后台线程写的（async_facts=True）。实测一轮要 15.9s——抽事实
+      // 那次 LLM 往返本身就占大头，触发巩固的那轮更久。定死几个时间点去刷新
+      // 总会猜错（原来只刷 2.5s，永远赶在写完之前，用户说了新东西右脑没动静）。
+      // 改成轮询到真的变了为止，最多盯 40 秒。
+      watchMemories();
       break;
 
     case 'answer_interrupt':
@@ -1590,20 +1713,76 @@ function handle(m){
   }
 }
 
+/* 说完一轮之后盯着后端，等后台线程把记忆写完。
+   写完的标志是记忆条数变了；40 秒还没动静就放弃（这一轮可能本来就没什么可存的，
+   比如问句、或者说的事实库里已经有了）。 */
+let watchTimer=null, watchTurn=0, turnSeq=0;
+//: 最近一次 memory_hits 的数量，给空状态显示原因用
+let LAST_HITS={at:0,l:0,r:0,rAll:0};
+// 快照是有上限的（左脑 48 条 / 每 slot 7 条，右脑每 slot 6 个），加一条记忆
+// 常常**不改变总数**，只是换掉了里面某一条。所以比内容指纹，不比条数。
+function memSignature(){
+  const sp=SPACES[LIVE];
+  if(!sp) return '';
+  const l=sp.left.map(x=>x.text).join('|');
+  const r=sp.right.map(x=>x.text+':'+(x.notes||[]).length).join('|');
+  return l+'##'+r;
+}
+function watchMemories(){
+  if(watchTimer) clearInterval(watchTimer);
+  watchTurn=++turnSeq;
+  const sig0=memSignature();
+  let tries=0;
+  watchTimer=setInterval(async function(){
+    tries++;
+    await loadMemories();
+    if(memSignature()!==sig0||tries>=20){ clearInterval(watchTimer); watchTimer=null; }
+  },2000);
+}
+
 /* 把当时那段原声放回来。走放回复的那个 AudioContext，接在回复队尾之后，
    不然会和还在播的回复叠在一起。 */
+/* 回放当时那段录音的时候，别把它当成用户又说了一遍。
+
+   放出来的声音会从扬声器绕回麦克风。浏览器的 echoCancellation 挡得住助手的 TTS，
+   却挡不住这个——实测放完一段音乐，后端立刻多出一轮空文本（`[speculate] '' -> 0
+   hits`），左右脑都没命中，模型手上空空，于是回一句"抱歉，我没法直接重播"。
+   日志里那段音乐还被认成"第 2 次听到"。
+   所以回放期间干脆不上行，播完再留一点余量给房间余响。 */
+//: 回放最多等助手的语音排队多久。
+//:
+//: 录音要排在助手那句引出语**后面**——先听它说"我把当时那段找出来了"，再听录音。
+//: 这个上限只是防呆：万一 TTS 队列因为别的原因堆了很久，不至于让人干等。
+//: 之前设成 4 秒，结果助手话还没说完录音就插进来了，顺序整个反过来。
+const REPLAY_MAX_WAIT_S=20;
+let replaying=false, replayTimer=null;
+function holdMic(ms){
+  replaying=true; lvOn=false;
+  clearTimeout(replayTimer);
+  replayTimer=setTimeout(()=>{ replaying=false; }, Math.max(0,ms));
+}
+function releaseMic(){ clearTimeout(replayTimer); replaying=false; }
+
 async function playMemoryClip(id){
   if(!id) return;
   try{
     const r=await fetch('/api/audio/'+encodeURIComponent(id));
-    if(!r.ok) return;
+    if(!r.ok){ console.warn('[replay] 取录音失败', id, r.status); return; }
     const ctx=ensurePlayback();
     const buf=await ctx.decodeAudioData(await r.arrayBuffer());
     const src=ctx.createBufferSource(); src.buffer=buf; src.connect(ctx.destination);
     scheduled.push(src);
-    const at=Math.max(ctx.currentTime+0.05,nextPlay);
+    // 排在助手那句引出语后面，但**别无限等下去**：realtime 的音频块是流式排队的，
+    // nextPlay 会一直往后推，等它排完可能是十几秒后——用户早就以为"没播"了。
+    // 排在已排队的语音之后（nextPlay），别抢在助手说完之前。
+    const wait=Math.min(Math.max(0,nextPlay-ctx.currentTime),REPLAY_MAX_WAIT_S);
+    const at=ctx.currentTime+wait+0.25;
     src.start(at); nextPlay=at+buf.duration;
-  }catch(e){}
+    console.log('[replay] 放录音', id, buf.duration.toFixed(1)+'s',
+                wait>REPLAY_MAX_WAIT_S?'（不再等 TTS 排完）':'（等 '+wait.toFixed(1)+'s）');
+    holdMic((at-ctx.currentTime+buf.duration)*1000+400);
+    src.onended=()=>{ setTimeout(releaseMic,400); };
+  }catch(e){ console.warn('[replay] 播放失败', e); releaseMic(); }
 }
 
 /* 用后端的小模型给这条对话起个概括性的标题，只在第二轮之后叫一次 */
@@ -1646,8 +1825,12 @@ talkBtn.addEventListener('click',async()=>{
     live=true; SIM.on=false;
     $('simBtn').classList.remove('on'); $('simBtn').textContent='模拟已停';
     // 真数据自成一个空间，切过去；里面新建一条对话，别接在脚本对话后面
+    // 先建会话再拉记忆。反过来的话 loadMemories 那几百毫秒里如果已经来了
+    // memory_hits，它会渲染进**旧的**那个 session，紧接着新 session 一建面板就
+    // 空了——表现就是右脑栏一直停在「等待检索…」。
+    ensureLiveSpace();
+    createSession(LIVE);
     await loadMemories();
-    createSession(LIVE);          // 它自己会 buildGraph（activeSpace 还是 demo）
     syncButtons(); setVoice('user');
     try{ await startMic(); }
     catch(e){ endLive('拿不到麦克风：'+e.name+'。已断开。'); }
@@ -1657,7 +1840,13 @@ talkBtn.addEventListener('click',async()=>{
       try{ playPcm(ev.data); }catch(e){ console.warn('[audio] 丢帧',e); }
       return;
     }
-    try{ handle(JSON.parse(ev.data)); }catch(e){ console.warn('[ws] 解析失败',e); }
+    let msg;
+    try{ msg=JSON.parse(ev.data); }
+    catch(e){ console.error('[vm] JSON 解析失败', e, ev.data); return; }
+    // 出错要看得见：handle 里任何一行抛了，后面所有轮次都不会再渲染，
+    // 表现就是「点了开始对话之后什么都不更新」，而控制台如果只 warn 很容易漏掉。
+    try{ handle(msg); }
+    catch(e){ console.error('[vm] 处理 '+msg.type+' 出错：', e); }
   };
   ws.onclose=()=>{ endLive('后端断开了。'); };
   ws.onerror=()=>{ toast('连不上 '+WS_HOST+'，确认 python web/run.py 在跑。'); };

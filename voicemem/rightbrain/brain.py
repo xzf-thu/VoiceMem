@@ -221,71 +221,55 @@ def _worth_analyzing(text: str, has_fact: bool) -> bool:
     return normalize_emotion_strict(text) is not None      # 短，但把情绪说出来了
 
 
-def _rb_graph_hits(rb_graph, user_id: str) -> list["RightBrainHit"]:
-    """右脑图(情绪/喜好与厌恶/表达风格/思维模式/应对方式)的 slot description，
-    每个有描述的 slot 各是一条画像观察。"""
-    return [
-        RightBrainHit(
-            content=f"{slot.name}：{slot.description}",
-            source="profile", priority=0.5, metadata={"slot_name": slot.name},
-        )
-        for slot in rb_graph.list_slots(user_id)
-        if slot.description
-    ]
+def _is_self_entity(ent, user_id: str, owner_names) -> bool:
+    """这个实体是不是「说话人自己」。
+
+    认三种：entity_type 明确是 user；名字就是记忆库的 user_id；名字在声纹注册表
+    登记过（demo 里就是 "Jiaqi"）。图里说话人存的 entity_type 常常是 person
+    （跟"老板"一样），所以不能只看类型。
+    """
+    if str(getattr(getattr(ent, "entity_type", None), "value", "")) == "user":
+        return True
+    name = (getattr(ent, "name", "") or "").strip()
+    return bool(name) and (name == user_id or name in owner_names)
 
 
-def _rb_emotion_trait_hit(rb_graph, user_id: str, emotion: str | None) -> "RightBrainHit | None":
-    """检索和当前情绪相近的用户固有性格节点：情绪是8个固定规范标签，按当前
-    情绪精确查"情绪"slot 下同名的那一个 entity，不用向量、不扫描其余7个。"""
-    if not emotion:
-        return None
-    from voicemem.rightbrain.anchor_router import normalize_emotion_strict
-    emo_slot = rb_graph.get_slot_by_name(user_id, "情绪")
-    if emo_slot is None:
-        return None
-    canonical = normalize_emotion_strict(emotion)
-    if canonical is None:
-        return None
-    ent = rb_graph.get_entity_by_name(user_id, emo_slot.id, canonical)
-    if ent is None or not ent.description:
-        return None
-    prefix = (
-        "Trait observed around this emotion: " if _is_en_text(ent.description)
-        else "当前情绪相关的性格观察："
-    )
-    return RightBrainHit(
-        content=f"{prefix}{ent.description}", source="emotion_trait", priority=0.75,
-    )
+#: 判断跟这句话至少要像到这个程度才返回。
+#:
+#: 实测的分界：「开会时间太长了」↔「不喜欢开长会」是 0.62，「我不太想去开会」是
+#: 0.69——真命中都在 0.6 以上。而「下午有个两小时的会，我有点怵」跟库里前八条的
+#: 相似度全挤在 0.36–0.45，第一名和第八名只差 0.08，那就是没命中，返回它们只是
+#: 拿噪音把 top-N 的位置占满（右脑限席那段注释里说的就是这个）。
+#: 宁可这一轮右脑不给画像，也不要给三条不相关的。
+RB_TRAIT_MIN_SIM = float(os.environ.get("VOICEMEM_RB_TRAIT_MIN_SIM", "0.45"))
 
 
-def _rb_relation_hits(rb_graph, user_id: str, anchors) -> list["RightBrainHit"]:
-    """关系节点检索：左脑这次问题触发的实体（anchors 里带真实 entity.id 的
-    锚点），直接按 ID 查对应的右脑关系节点——纯索引查表，不扫描、不算向量。"""
-    from voicemem.rightbrain.anchor_router import _ENTITY_TYPE_TO_ANCHOR
-    entity_anchor_types = set(_ENTITY_TYPE_TO_ANCHOR.values())
-    rel_slot = rb_graph.get_slot_by_name(user_id, "人物地点态度")
-    if rel_slot is None:
-        return []
-    hits: list[RightBrainHit] = []
-    seen: set[str] = set()
-    for a in anchors:
-        if a.anchor_type not in entity_anchor_types or not a.anchor_id:
-            continue
-        if a.anchor_id in seen:
-            continue
-        seen.add(a.anchor_id)
-        ent = rb_graph.get_entity_by_source_id(user_id, rel_slot.id, a.anchor_id)
-        if ent is not None and ent.description:
-            content = (
-                f"Impression of {ent.name}: {ent.description}"
-                if _is_en_text(ent.description)
-                else f"对 {ent.name} 的印象：{ent.description}"
-            )
-            hits.append(RightBrainHit(
-                content=content,
-                source="relation", priority=0.85, metadata={"entity_name": ent.name},
-            ))
-    return hits
+def _rb_trait_hits(store, user_id: str, query: str, top_k: int = 4) -> list["RightBrainHit"]:
+    """按语义查判断表（rb_traits），最贴合这句话的几条判断。
+
+    这里取代的是原来的 ``_rb_graph_hits``——它返回每个 slot 的整段 description，
+    跟 query 无关，所以每轮回来的永远是同样那五条静态摘要（"用户偏好手冲咖啡和
+    安静聚会，热爱AI工作…"），问「别人插嘴怎么办」也照样返回咖啡。
+    判断的 claim 有向量，这里才是真正按问题检索。
+
+    priority 用相似度而不是固定值：判断跟这句话有多相关，直接决定它该不该占
+    top-N 的位置。
+    """
+    out: list[RightBrainHit] = []
+    for t, sim in store.search_scored(user_id, query, top_k=top_k):
+        if sim < RB_TRAIT_MIN_SIM:
+            break                      # 已按相似度降序，后面只会更低
+        # 证据里挑最近一条当支撑——光一句 claim，模型看不出它是从哪来的。
+        ev = t.evidence[0].quote if t.evidence else ""
+        content = f"{t.claim}（{t.slot}）" + (f"｜他说过：{ev[:60]}" if ev else "")
+        out.append(RightBrainHit(
+            content=content, source="profile",
+            priority=round(float(sim), 3),
+            metadata={"slot_name": t.slot, "trait_id": t.id, "claim": t.claim},
+        ))
+    return out
+
+
 
 
 #: 各来源在 top-N 里最多占几席。没列的不限。
@@ -293,15 +277,17 @@ def _rb_relation_hits(rb_graph, user_id: str, anchors) -> list["RightBrainHit"]:
 #: 为什么要配额：这两类的 priority 都是**查询无关**的常数，谁都竞争不过它们——
 #:   · response_experience 记的是"助手上次怎么答的"（"✓ 有效方式：助手用轻松的
 #:     语气引导用户展开对话"），是给回复层看的内部笔记，不是对用户其人的认识；
-#:   · profile 是每个 slot 的静态描述（``_rb_graph_hits`` 把所有带描述的 slot
-#:     无条件全返回，priority 固定 0.5），**每一轮都是同样那几条**。
-#: 实测这两类合起来能吃掉 top-5 的全部席位，于是右脑对每个问题给的东西都一样：
-#: 回复里读不出"它记得我这件事"，脑图上每次检索射向的也永远是同一批节点。
-#: 真正随问题变的是 situation_pattern（情感记录）和 relation（对某人的印象）——
-#: 得给它们留出位置。
+#:   · profile 原来是每个 slot 的静态描述，无条件全返回、priority 固定 0.5，
+#:     **每一轮都是同样那几条**。实测这两类合起来能吃掉 top-5 的全部席位，于是
+#:     右脑对每个问题给的东西都一样：回复里读不出"它记得我这件事"，脑图上每次
+#:     检索射向的也永远是同一批节点。
+#:
+#: profile 现在换成了判断表的语义检索（``_rb_trait_hits``），priority 就是相似度，
+#: 已经跟查询相关了，所以席位放宽到 3；response_experience 仍是查询无关的内部
+#: 笔记，维持 1 席。
 _SOURCE_QUOTA = {
     "response_experience": max(0, int(os.environ.get("VOICEMEM_RB_RESPONSE_MAX", "1"))),
-    "profile": max(0, int(os.environ.get("VOICEMEM_RB_PROFILE_MAX", "2"))),
+    "profile": max(0, int(os.environ.get("VOICEMEM_RB_PROFILE_MAX", "3"))),
 }
 
 
@@ -458,12 +444,13 @@ class RightBrain:
             rb_ctx = rb_repo.retrieve(plan)
             collected: list[RightBrainHit] = _rb_ctx_to_hits(rb_ctx) if not rb_ctx.is_empty() else []
 
-            rb_graph = self._rb_graph_store()
-            collected.extend(_rb_relation_hits(rb_graph, self._user_id, plan.anchors))
-            trait_hit = _rb_emotion_trait_hit(rb_graph, self._user_id, emotion)
-            if trait_hit is not None:
-                collected.append(trait_hit)
-            collected.extend(_rb_graph_hits(rb_graph, self._user_id))
+            # 画像：按这句话去判断表里查最贴合的几条。
+            #
+            # 原来这里挂的是旧 slot→entity 图的三个来源（关系节点 / 情绪同名实体 /
+            # slot description）。前两个已经不再写入，第三个跟 query 无关——每轮
+            # 返回同样那五条静态摘要，问什么都一样。判断表的 claim 带向量，
+            # 这里换成真检索。
+            collected.extend(_rb_trait_hits(self._traits(), self._user_id, query))
 
             # 按 priority 排序截断，rb_directive 从截断后的列表渲染，保证一致。
             collected.sort(key=lambda h: h.priority, reverse=True)
@@ -484,14 +471,34 @@ class RightBrain:
     def write(self, emotion, result, text, entities, observed_at,
               agent_reply: str = "") -> str | None:
         """右脑写入段：每条 utterance 一条 heartnote，挂 emotion + entity anchors +
-        关系节点 + 右脑 slot→entity 图层。gate 只看 emotion（不绑 result.memory_ids）——
-        纯情绪句左脑可能抽不出事实但情绪仍值得记；mid 为空时不挂证据、不查左脑实体
-        链接，但情绪锚点 + 文本实体名锚点仍正常写。
+        关系节点 + 右脑 slot→entity 图层。不绑 result.memory_ids——纯情绪句左脑
+        可能抽不出事实但仍值得记；mid 为空时不挂证据、不查左脑实体链接，但情绪
+        锚点 + 文本实体名锚点仍正常写。
 
         ``agent_reply``：agent 上一轮那句。同一句"行吧"，跟在共情后面和跟在甩方案
         后面是两种情绪——喂给内心 OS 生成，并存进 metadata 留证据。
         """
-        if not emotion:
+        # 原来这里是 `if not emotion: return`——情绪当成了右脑的总开关。可情绪只是
+        # 右脑五类里的一类：「我讨厌别人吃饭吧唧嘴」是喜好、「我做决定前先列利弊」
+        # 是思维模式，都识别不出情绪，于是右脑一个字都不写，用户说什么新东西图上
+        # 都没反应。改成：没情绪但抽得出特质也照写。
+        # traits 在这儿算一次，下面直接用——合并抽取那条路上它是现成的（0 额外调用），
+        # 没走合并才会真发一次 LLM，而且只在没情绪时才发。
+        # 情绪：合并抽取那次调用顺带让模型按**说了什么**判过一次，优先用它。
+        #
+        # 它比上游那个关键词表准：表只看句子里有没有某个词，「我好生气啊，我的
+        # 老板老压力我」会因为「压力」两个字被判成【焦虑】，而人明说了生气；
+        # 模型读整句，给的是【愤怒】。判不出来时模型返回空串，那就退回上游的值。
+        # 标错比不标更糟——这个标签会印成【x】贴在用户自己的话旁边（旧数据里
+        # 「我喜欢草莓」被标成【悲伤】就是这么来的）。
+        from voicemem.leftbrain import merged_extraction
+        judged = (merged_extraction.take_emotion(text) or "").strip()
+        if judged:
+            emotion = judged
+
+        worth = _worth_analyzing(text, has_fact=bool(getattr(result, "memory_ids", None)))
+        traits = self._extract_rb_traits(text, emotion) if worth else []
+        if not emotion and not traits:
             return
         try:
             from voicemem.rightbrain.types import MemoryAnchor
@@ -501,7 +508,7 @@ class RightBrain:
             # content 存原话，inner_os 进 metadata（渲染时作为补充拼在原话
             # 后面，见 _rb_ctx_to_hits）——避免共情改写抹掉数字/名字/时间等细节。
             # 填充语（试麦/应答/打断）不值得为它编一段内心 OS，见 _worth_analyzing。
-            worth = _worth_analyzing(text, has_fact=bool(mid))
+            # worth 在函数开头已经算过（那里要用它决定抽不抽 traits），别再算一遍。
             inner_os = (self._generate_inner_os(text, emotion, entities or [], agent_reply)
                         if worth else "")
             content = text
@@ -529,16 +536,16 @@ class RightBrain:
                                  role="trigger", weight=1.0, confidence=1.0),
                 )
             # entity anchors：优先用左脑这条记忆真正链上的 entity.id（稳定），
-            # name 字符串锚点做兜底。同一循环里顺手给每个实体建/更新一个专属
-            # 关系节点（source_entity_id 精确匹配），这里只负责挂证据 + touch，
-            # description 的提炼交给 AttributionManager.run_short_term。
+            # name 字符串锚点做兜底。锚点是检索用的索引，跟脑图节点是两回事，保留。
+            #
+            # 这里原来还顺手在「人物地点态度」slot 下给每个实体建一个节点。那批节点
+            # 已经不建了——它们存的是**话题**（手冲咖啡 / NUS / 佳琪），本来就是左脑
+            # 认知图的事，塞进右脑只会滚成大杂烩（实测「佳琪」一个节点 52 条）。
+            # 右脑现在只放关于人的判断，见 traits_store.py。
             try:
                 from voicemem.rightbrain.anchor_router import _ENTITY_TYPE_TO_ANCHOR
                 cog_store = self._repo()._cognitive_store
                 if mid and cog_store is not None:
-                    rb_graph = self._rb_graph_store()
-                    tracker  = self._tracker()
-                    rel_slot = rb_graph.get_or_create_slot(self._user_id, "人物地点态度")
                     for eid in cog_store.entity_ids_for_memory(mid):
                         ent = cog_store.get_entity(eid)
                         if ent is None:
@@ -551,13 +558,8 @@ class RightBrain:
                                 weight=1.0, confidence=ent.confidence,
                             ),
                         )
-                        rel_ent, _created = rb_graph.get_or_create_entity_by_source_id(
-                            self._user_id, rel_slot.id, ent.id, ent.name,
-                        )
-                        rb_graph.link_memory(rel_ent.id, self._user_id, rb_mem.id)
-                        tracker.touch(self._user_id, "rb_entity_short", rel_ent.id)
             except Exception as e:
-                print(f"[RBAnchor] 实体ID锚点/关系节点写入失败: {e}")
+                print(f"[RBAnchor] 实体ID锚点写入失败: {e}")
 
             for name in (entities or []):
                 rb_repo._store.link_anchor(
@@ -566,30 +568,69 @@ class RightBrain:
                                  role="subject", weight=0.8, confidence=1.0),
                 )
 
-            # 右脑 slot→entity 图层：情绪(精确匹配8个固定标签) + 其余4类(语义匹配)
+            # 右脑脑图：这一轮看出的 traits 写进判断表（rb_traits/rb_evidence）。
+            #
+            # 旧的 slot→entity 图层已经不写了。那一层的 entity 身兼三职——判断、
+            # 话题、光秃秃的情绪词——三种东西混在一起，结果是「悲伤」一个节点吃掉
+            # 61 条、「佳琪」吃掉 52 条，标题也没法统一。判断表一个节点就是一条
+            # 关于这个人的判断，claim 带向量，右脑才终于能按语义检索。
+            # 旧表只读保留一版，不再写入。
             try:
-                rb_graph = self._rb_graph_store()
-                tracker = self._tracker()
-                emo_slot = rb_graph.get_slot_by_name(self._user_id, "情绪")
-                if emo_slot is not None and canonical_emotion is not None:
-                    emo_ent = rb_graph.get_or_create_entity(
-                        self._user_id, emo_slot.id, canonical_emotion,
-                    )
-                    rb_graph.link_memory(emo_ent.id, self._user_id, rb_mem.id)
-                    tracker.touch(self._user_id, "rb_entity_short", emo_ent.id)
-                    tracker.touch(self._user_id, "rb_slot_long", emo_slot.id)
-
-                # 情绪 slot 上面已无条件挂好（模型每轮都打了标）；4 类特质要再花
-                # 一次 LLM，填充语里抽不出真特质，只会往画像里塞噪音。
-                if worth:
-                    for slot_name, label in self._extract_rb_traits(text, emotion):
-                        self._write_trait(slot_name, label, rb_mem.id)
+                from voicemem.rightbrain.traits_store import Evidence
+                # cause = 这条判断背后的左脑事实。vector_store 没有按 id 取文本的
+                # 口子，从 list_entries 里找一次（几十条，很快）。
+                left_fact = ""
+                if mid:
+                    try:
+                        for e in (self._repo()._vector_store
+                                  .list_entries(user_id=self._user_id)):
+                            if str(e.get("id")) == str(mid):
+                                left_fact = str(e.get("text", ""))
+                                break
+                    except Exception:
+                        left_fact = ""
+                ev = Evidence(quote=text, emotion=emotion or "",
+                              cause=left_fact, cause_id=mid or "",
+                              at=str(observed_at or ""))
+                for slot_name, label in traits:
+                    self._traits().add(self._user_id, slot_name, label, ev)
             except Exception as e:
-                print(f"[RBGraph] 右脑图层写入失败: {e}")
+                print(f"[RBGraph] 判断表写入失败: {e}", flush=True)
             return rb_mem.id
         except Exception as e:
             print(f"[Ingest] right brain write skipped: {e}")
             return None
+
+    def _traits(self):
+        """右脑 v2 的判断表（见 traits_store.py）。懒建，跟其余存储共用同一个 sqlite。"""
+        if "traits" not in self._cache:
+            from voicemem.rightbrain.traits_store import TraitStore
+            from voicemem.utils.common import space as _space
+            self._cache["traits"] = TraitStore(_space.db(self._memory_root), self._embed)
+        return self._cache["traits"]
+
+    def _registry_names(self) -> set:
+        """声纹注册表里登记过的人名——用来认出「说话人自己」。
+
+        RightBrain 没有直接持有 registry（它是音频侧的东西），从 space 的
+        multi_modal/voiceprint_registry.json 直接读，读不到就返回空集：
+        认不出自己顶多是多一个节点，不该让写入失败。
+        """
+        try:
+            import json
+            from voicemem.utils.common import space as _space
+            p = _space.mm(self._memory_root, "voiceprint_registry.json")
+            if not p.is_file():
+                return set()
+            data = json.loads(p.read_text(encoding="utf-8"))
+            out = set()
+            for k, v in data.items():
+                out.add(k)
+                if isinstance(v, dict) and v.get("name"):
+                    out.add(v["name"])
+            return out
+        except Exception:
+            return set()
 
     def _write_trait(self, slot_name: str, label: str, memory_id: str) -> bool:
         """往图层 slot 下挂一个语义去重的特质 entity，并把这条记忆作为证据链上去。
@@ -756,11 +797,15 @@ significant 不管真假，其余字段都要照填（调用方另有判定）�
             trait = attribution.get("user_trait") or {}
             if isinstance(trait, dict):
                 slot_name, label = str(trait.get("slot") or ""), _clip(trait.get("label"))
-                # 证据挂 heartnote（用户原话）——归因是读证据的 content 来写
-                # description 的，挂 exp 就成了"拿助手的做法去描述用户特征"。
-                if label and label.lower() not in ("null", "none") and \
-                        self._write_trait(slot_name, label, heartnote_id or exp.id):
-                    print(f"[RBTrait] {slot_name} ← {label}", flush=True)
+                # 证据用**用户原话**，不是助手这条经验——归因是读证据来写描述的，
+                # 挂 exp 就成了「拿助手的做法去描述用户特征」。
+                if label and label.lower() not in ("null", "none"):
+                    from voicemem.rightbrain.traits_store import Evidence
+                    if self._traits().add(
+                            self._user_id, slot_name, label,
+                            Evidence(quote=text.strip()[:200], emotion=emotion or "",
+                                     cause_id=memory_id or "", at=str(observed_at or ""))):
+                        print(f"[RBTrait] {slot_name} ← {label}", flush=True)
         except Exception as e:
             print(f"[RBExperience] 回应经验写入失败: {e}")
 

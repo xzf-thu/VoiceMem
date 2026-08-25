@@ -20,6 +20,7 @@ from __future__ import annotations
 from voicemem.utils.common import space as _space
 
 import os
+import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -63,6 +64,32 @@ _SCENE_RECALL_QUERY: dict[str, str] = {
 
 # "回放原声"意图关键词：命中任意一个就认为用户在要求听回放，整句直接拿去语义搜索。
 _PLAYBACK_PATTERNS = ["回放", "播放", "放一下", "听听", "重新放", "再放一遍"]
+
+
+#: 用户嘴上说了"我要放段音乐给你听"的说法。声学识别会漏（外放、环境吵、片段短），
+#: 但人明说了就没什么可怀疑的——见 _write_audiomem_tags 里 tune:unidentified 那段。
+#:
+#: 只认**用户是提供方**的说法。「重播第一首歌」「帮我放那首歌」是在**要**音乐，
+#: 那一轮录的是他的提问，不是歌；早先的正则宽到把它也算上，结果提问轮进了回放的
+#: 候选池、还是最新的一条，一问就把用户自己刚说的话放回去。
+_ASKING_PLAYBACK = re.compile(
+    r"重播|再放一遍|再听一遍|回放"
+    r"|(你|您)(能|可以|帮|给)"
+    r"|帮我(放|播|找|重|再)"
+    r"|给我(放|播|听|重)"
+)
+_SAID_MUSIC = re.compile(
+    r"给你听|放给你听|给你放|给你来(一)?(段|首)"
+    r"|我(来|想|要|先)?(给你)?(放|播|哼|唱)(一)?(段|首|个)?\s*(音乐|歌|曲子|旋律|钢琴|吉他)"
+    r"|(这|那)(是|首|段)?\s*(音乐|歌|曲子|旋律)\s*(好听|不错|怎么样|你听)"
+    r"|哼(一)?(段|首)给你"
+)
+
+
+def said_music(text: str) -> bool:
+    """这句话是不是"我要放段音乐给你听"。在**要**回放的那句上一律为假。"""
+    t = text or ""
+    return bool(_SAID_MUSIC.search(t)) and not _ASKING_PLAYBACK.search(t)
 
 
 class AudioPerceiver:
@@ -750,9 +777,27 @@ class AudioPerceiver:
 
         # 音乐/哼唱标签：把 tune_id 写入 memory_tags 供按"同一首歌/调子"检索；
         # heard_count>=2 时额外生成一条"又听到熟悉的调子"记忆事实。
-        if tune_result is not None and result.memory_ids:
+        # 「这段录音里有没有音乐」和「是哪一首」是两件事，标签该按前者打。
+        #
+        # AST 那个环境音分类器本来就在判断前者（_MUSIC_KEYWORDS：music / singing /
+        # humming / whistling / musical instrument…），detection["music"] 非空就是
+        # 它说有。而 tune_result 来自 music_store.identify()——那是**同一性匹配**，
+        # 回答的是"跟我存过的哪首像"，它返回 None 只说明认不出是哪首，不代表没有
+        # 音乐。原来把标签绑在 tune_result 上，于是"听见了但认不出是哪首"的那些轮
+        # 全都进不了回放的候选池。
+        ast_music = (detection or {}).get("music") or None
+        if (ast_music or tune_result is not None) and result.memory_ids:
+            tune_id = getattr(tune_result, "tune_id", None) if tune_result else None
             try:
-                self._tag(result.memory_ids, [(f"tune:{tune_result.tune_id}", 0.9)])
+                self._tag(result.memory_ids,
+                          [(f"tune:{tune_id}" if tune_id else "tune:unidentified", 0.9)])
+                # detection["music"] 是 {"labels": [(标签, 分数), ...], "embedding": ...}
+                _labels = (ast_music or {}).get("labels") or []
+                top = f"，最强 {_labels[0][0]} {_labels[0][1]:.2f}" if _labels else ""
+                which = (f"{tune_result.action}, 第 {tune_result.heard_count} 次"
+                         if tune_result else "认不出是哪首")
+                print(f"  [music] tag {tune_id or 'unidentified'} → "
+                      f"{len(result.memory_ids)} 条记忆（{which}{top}）", flush=True)
             except Exception as _e:
                 print(f"  [music] tag write failed: {_e}", flush=True)
 
@@ -777,6 +822,38 @@ class AudioPerceiver:
                     })
                 except Exception as _e:
                     print(f"  [music] recognition fact skipped: {_e}", flush=True)
+
+        # 声学没认出来，但**人明说了这是音乐**：照样打标签。
+        #
+        # 识别走的是声纹式的相似度匹配，手机外放、环境吵、片段太短都会漏——实测
+        # 真机上放了一段歌，日志里就是一行"音乐识别没命中"。可用户嘴上说的是
+        # 「我给你听首歌」，这比任何声学特征都确凿。漏了这条，那段录音就进不了
+        # 回放的候选池，之后问「上周三那首歌」怎么都找不到。
+        #
+        # 用 tune:unidentified 而不是编一个 tune_id：确实不知道是哪首，别假装知道。
+        # 候选池按 `tune:%` 查（见 web/run.py 的 _tune_memories），认得这个。
+        # 变量别跟模块级的 said_music 同名——同名会把那个函数遮蔽成局部变量，
+        # 在赋值之前引用就是 UnboundLocalError。
+        _said = said_music(text)
+        if (tune_result is None and not ast_music
+                and _said and audio_path and result.memory_ids):
+            try:
+                self._tag(result.memory_ids, [("tune:unidentified", 0.6)])
+                print(f"  [music] 声学没认出来，但他说了是音乐 → 照样标上"
+                      f"（{len(result.memory_ids)} 条记忆）", flush=True)
+            except Exception as _e:
+                print(f"  [music] tag write failed: {_e}", flush=True)
+
+        # 没打上标签的情况分开记。标签是「这段录音里有音乐」唯一直接的证据，
+        # 回放时靠它把候选缩到真正的音乐上；缺了只能退回按时间和文本猜。
+        # 实测真机上有过"音乐明明听到了却没标签"，事后光看库推不出是哪一种。
+        #
+        # 写成独立的 if，别接成上面那个的 elif——「听过两次就生成一条记忆」那段是
+        # 嵌在 if 里面的，加 elif 会把它挤出来，tune_result 为 None 时就去读它的
+        # 属性了（AttributeError: 'NoneType' object has no attribute 'action'）。
+        elif audio_path and not result.memory_ids:
+            why = "这一轮没有入库任何事实"
+            print(f"  [music] 没打 tune 标签：{why}", flush=True)
 
         # 异常环境音记忆：破碎声/警报/尖叫——第一次出现就值得记一笔，每次检测到
         # 都打标签 + 生成一条记忆事实。独立警报事实的写入不依赖 result.memory_ids

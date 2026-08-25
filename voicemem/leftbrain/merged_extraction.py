@@ -53,12 +53,31 @@ def take_annotation(fact_text: str) -> dict | None:
     return _take(_annotations, (fact_text or "").strip())
 
 
+# 情绪和特质是**整段**的，不挂在某条 fact 上，而且抽取和右脑写入是同一轮、同一
+# 个线程里前后脚发生的。原来按原话做 key，结果取不到——抽取拿到的原话带着
+# "Speaker 0: " 前缀，跟右脑那边收到的 text 对不上。改成线程局部的「上一次」：
+# 同一线程内前后脚匹配，多线程（评测并发跑）之间互不干扰。
+_local = threading.local()
+
+
+def put_emotion(utterance: str, emo: str) -> None:
+    _local.emotion = emo
+
+
+def take_emotion(utterance: str = "") -> str | None:
+    v = getattr(_local, "emotion", None)
+    _local.emotion = None          # 取出即清，别让上一轮的漏到下一轮
+    return v
+
+
 def put_traits(utterance: str, traits: list) -> None:
-    _put(_traits, (utterance or "").strip(), traits)
+    _local.traits = traits
 
 
-def take_traits(utterance: str) -> list | None:
-    return _take(_traits, (utterance or "").strip())
+def take_traits(utterance: str = "") -> list | None:
+    v = getattr(_local, "traits", None)
+    _local.traits = None
+    return v
 
 
 # 追加到抽取 prompt 后面的那一段。刻意写得短——这段每次 ingest 都要发一遍，
@@ -74,12 +93,70 @@ Additionally, for EACH item in "memory", include these three fields:
 
 And add ONE top-level field "traits": subjective things this utterance reveals about
 the speaker. Each item {{"slot": "...", "label": "<5-15 chars>"}}, slot is one of:
-喜好与厌恶 (likes/dislikes), 表达风格 (how they communicate),
-思维模式 (how they think/decide), 应对方式 (how they cope with stress).
-Only include a category the utterance clearly shows. "traits": [] is fine.
-Never invent entities or traits that are not in the text."""
+
+  情绪        WHEN they feel WHAT — the situation plus the feeling it triggers.
+              "评审前会紧张", "被打断就烦", "项目延期会焦虑"
+  应对方式     what they DO about a feeling, or how they want to be treated.
+              "压力大时想被安抚", "难受时想一个人待着"
+  表达风格     habits of speaking and communicating
+  思维模式     how they think, weigh things, decide
+  喜好与厌恶   what they like or dislike
+
+情绪 vs 应对方式 is the one people get wrong: "被打断就烦" is 情绪 (a feeling
+appearing), "被打断了就先走开" is 应对方式 (an action taken). If the label has no
+verb of doing or wanting in it, it is 情绪.
+
+For "情绪" the label must read as **a pattern, not a bare feeling word**:
+"评审前会紧张", "被打断就烦", "一个人待着会踏实" — NOT "焦虑" / "开心".
+It becomes the title of a node on a graph; a bare word tells the user nothing.
+
+When the utterance states a RECURRING tendency about the speaker — "一…就…",
+"每次…都…", "总是", "从来不", "我这人…", or any habit/reaction that clearly
+holds beyond this one moment — a trait is REQUIRED. "我一开长会就走神" is
+喜好与厌恶「不喜欢开长会」; "我每次汇报前都睡不着" is 情绪「汇报前会睡不着」.
+Do not skip it just because the same content also went into "memory": "memory"
+records WHAT HAPPENED, "traits" records WHAT THIS PERSON IS LIKE, and one
+sentence very often carries both.
+
+Outside that case, only include a category the utterance clearly shows —
+for a one-off event or a plain question, "traits": [] is the right answer.
+
+Each label becomes the TITLE of a node on a graph, so write it as a short
+pattern — 5-15 Chinese characters, no subject, no full stop:
+  好：讨厌被打断 / 压力大时想被安抚 / 先要结论再要解释
+  差：用户倾向于详细规划和结构化思考。（带主语的整句）
+  差：我是计算机专业（照抄原话/事实）
+
+Also add ONE top-level field "emotion": how the speaker feels, as a single
+Chinese word (愉悦/开心/平静/焦虑/难过/委屈/愤怒/惊讶/疲惫/失望 …).
+**Judge from what they actually say.** "我喜欢草莓" is 愉悦, not 悲伤;
+"我好生气啊" is 愤怒, not 焦虑. If the utterance carries no clear feeling
+(a plain fact, a question), return "" — an empty string is the right answer
+far more often than a guess. A wrong label is worse than none: it gets shown
+to the user as 【label】 next to their own words.
+
+Never invent entities, traits or feelings that are not in the text.
+
+Keep one-off requests OUT of "memory": asking for a recommendation, asking what
+you remember about them, asking you to do something right now. When the same
+sentence ALSO states a lasting fact, write only the lasting half — never both in
+one item. "我下周要考GRE，你有什么书推荐吗" gives exactly one memory,
+「用户下周要参加GRE考试」, and nothing about the book request.
+
+OUTPUT SHAPE — your JSON object must have EXACTLY these three top-level keys:
+{{"memory": [...], "emotion": "...", "traits": [...]}}
+The prompt above describes only the "memory" key. "emotion" and "traits" are
+REQUIRED as well; omitting them is an error. Use "" and [] when there is nothing."""
 
 
 def prompt_addendum() -> str:
+    """追加到**用户消息**末尾的那一段。
+
+    注意是用户消息，不是 system。放 system 末尾时模型只认里面的 per-item 字段
+    （slot/entities 出得来），顶层的 emotion/traits 一律丢掉——用户消息里那份输出
+    格式说明写死了顶层只有 "memory"，模型严格照做。于是右脑每轮拿到的都是
+    emotion="" + traits=[]，write() 直接早退，脑图一个节点都不长。
+    最后那段 OUTPUT SHAPE 就是为此显式重申顶层结构，别删。
+    """
     from voicemem.leftbrain.cognitive_graph.slot_v2 import ALL_SLOT_V2_VALUES
     return PROMPT_ADDENDUM.format(slots=", ".join(ALL_SLOT_V2_VALUES))

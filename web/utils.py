@@ -1,10 +1,11 @@
 """web demo 的管道层（非主流程）——核心对话逻辑在 run.py，页面渲染在 index.html。
 
 这里放：本地 E5（memory embedding + slot 分类共享一份模型）、音频重采样/VAD、
-LLM/TTS/Realtime 流、以及 FastAPI + WebSocket 接线。run.py 只管把这些拼成 0–500ms
+LLM/TTS/Realtime 流、以及 FastAPI + WebSocket 接线。run.py 只管把这些拼成 0–300ms
 投机预取的对话流程。
 """
 import os
+import re
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -70,16 +71,39 @@ def _emotion_of(rb_hits) -> str:
     而内心OS 现在是有 gate 的（不是每轮都生成），抠不到就一直不显示。情绪本来
     就在 metadata.emotion 里，直接给前端，别让它猜。
     """
-    # 本轮的情绪（current_signal 的 affect_hint）优先于检索回来的旧记忆上那个——
-    # 标签栏写的是"现在他什么心情"，不是"想起来的那件事当时什么心情"。
-    for want_now in (True, False):
-        for h in (rb_hits or []):
-            if (getattr(h, "source", "") == "current_signal") != want_now:
-                continue
-            emo = ((getattr(h, "metadata", None) or {}).get("emotion") or "").strip()
-            if emo:
-                return emo
+    # **只认本轮的信号**（current_signal 的 affect_hint）。
+    #
+    # 原来取不到就退回"检索回来的旧记忆上带的情绪"，那是个 bug：标签栏写的是
+    # "现在他什么心情"，退回去之后显示的却是"想起来的那件事当时什么心情"——库里
+    # 悲伤的记忆一多，每轮都显示悲伤，跟用户说什么无关。
+    # 本轮没有信号就返回空，交给 run.py 的 fill_tags（文本关键词 → SenseVoice）。
+    for h in (rb_hits or []):
+        if getattr(h, "source", "") != "current_signal":
+            continue
+        emo = ((getattr(h, "metadata", None) or {}).get("emotion") or "").strip()
+        if emo:
+            return emo
     return ""
+
+
+#: 右脑记忆送去给**模型**时会拼上日期和 slot 前缀（"[2026-08-24] ⚠ 避免重复：…"）——
+#: 模型需要知道这是什么时候、属于哪一类。但页面上不该显示这些：左脑那栏是干干净净
+#: 一句事实，右脑却顶着一串前缀，看着像两个系统。分类信息已经单独放在 cluster 字段
+#: 里了，正文只留正文。
+_RB_PREFIX = re.compile(r"^\s*(?:\[[^\]]*\]\s*)?(?:[⚠✓✱*]\s*)?(?:[^：:\s]{2,8}[：:]\s*)?")
+
+
+#: 渲染给**模型**看时会在正文后面补两段：回应经验的「（下次：…）」是可执行建议，
+#: heartnote 的「（内心OS：…）」是补充解读。页面上只要正文——情绪单独用【x】显示，
+#: 分类在 cluster 字段里。
+_RB_SUFFIX = re.compile(
+    r"[（(]\s*(?:下次|next time|内心OS|inner note)\s*[：:].*$", re.S | re.I)
+
+
+def clean_rb(content: str) -> str:
+    t = _RB_PREFIX.sub("", str(content or ""))
+    t = _RB_SUFFIX.sub("", t)
+    return t.strip()
 
 
 def hits_payload(result, has_audio=None, cluster_of=None):
@@ -99,7 +123,18 @@ def hits_payload(result, has_audio=None, cluster_of=None):
                         "has_audio": bool(has_audio and has_audio(h.memory_id))}
                        for h in result.hits],
         # cluster 由 run.py 注入（同一套规则，前端不再自己从 source 猜）
-        "right_brain_hits": [{"content": h.content, "source": h.source, "priority": h.priority,
+        # content 给页面看（已去前缀），raw 保留原文——脑图要靠它跟 heartnote 对上
+        # internal：response_experience 是助手对**自己**行为的笔记（"这次没先接住
+        # 情绪，下次先问"），对模型有用，但它不是关于用户的画像——摆在页面的
+        # 「右脑·画像」栏里用户看着莫名其妙。前端据此跳过显示，脑图匹配仍照用。
+        "right_brain_hits": [{"content": clean_rb(h.content), "raw": h.content,
+                              "internal": h.source == "response_experience",
+                              # profile 类命中是 **slot 级**的画像（"喜好与厌恶：…"），
+                              # 而脑图节点是 **实体**级的，按正文永远匹配不上——右脑
+                              # 节点从来不亮、左右脑之间也就没有射线。把 slot 名带上，
+                              # 前端好把它落到该 slot 下的节点。
+                              "slot": ((getattr(h, "metadata", None) or {}).get("slot_name") or ""),
+                              "source": h.source, "priority": h.priority,
                               "cluster": cluster_of(h.content, h.source) if cluster_of else ""}
                              for h in (getattr(result, "rb_hits", None) or [])],
         "current_scene": getattr(result, "current_scene", None) or None,

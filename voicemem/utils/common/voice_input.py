@@ -23,6 +23,8 @@ voiceprint_id → 人名 / entity_id 映射通过 VoiceprintRegistry 管理。
 """
 from __future__ import annotations
 
+import os as _os
+
 import os
 
 import json
@@ -593,8 +595,16 @@ def ingest_voice_input(
             pass
     existing = _drop_other_named_people(existing)
 
+    # 冲突判定（新事实 vs 库里已有 → ADD/UPDATE/DELETE）是一次 LLM 调用，而且
+    # prompt 里要塞进已有记忆，**库越大越慢**：实测 95 条的库上这一次就要 10.2s，
+    # 占整轮 ingest 的一半。
+    # VOICEMEM_ALWAYS_ADD=1 跳过它，一律新增——反正每条都带时间戳，检索时以最新
+    # 为准。代价是同一属性的新旧值都留在库里（"最喜欢的餐厅是A" 和 "…是B"），
+    # 靠回答模型按日期取舍。
+    always_add = _os.environ.get("VOICEMEM_ALWAYS_ADD", "0") == "1"
+
     resolutions = []
-    if existing and new_fact_texts:
+    if existing and new_fact_texts and not always_add:
         try:
             resolver = ConflictResolver(single_valued_rule=wide)
             resolutions = resolver.resolve(new_fact_texts, existing, speaker_name=speaker_name)

@@ -35,7 +35,7 @@ A quick overview of VoiceMem:
 
 * **Left Brain:** Directly manages factual information and maintains strong retrieval performance under a Top-3 memory limit.
 * **Right Brain:** Manages emotional intelligence through short-term and long-term emotional attribution, including cross-entity nodes and joint maintenance with Left Brain information.
-* **Low Latency:** Uses information compression, hierarchical storage, and streaming retrieval with 0–500 ms speculative prefetching, adding very little extra latency.
+* **Low Latency:** Uses information compression, hierarchical storage, and streaming retrieval with 0–300 ms speculative prefetching, adding very little extra latency.
 * **Simple and Practical:** Each query uses about 300 memory tokens. The architecture is fully decoupled, and every component, including the underlying memory engine, can be replaced independently.
 
 <p align="center">

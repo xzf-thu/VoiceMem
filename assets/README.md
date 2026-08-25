@@ -20,7 +20,7 @@ README 流式那一节喂进 `vm.stream()` 的那段。内容是「我的饮食�
 
 ## speech.wav
 
-`tests/` 两个自检和 `examples/02_streaming.py` 的默认输入。
+`examples/02_streaming.py` 的默认输入。
 内容是「我喜欢吃马卡龙」，7.7 秒，16 kHz 单声道 PCM16。
 
 ## cafe_song.wav

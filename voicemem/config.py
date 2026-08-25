@@ -179,6 +179,8 @@ def build_kwargs(config: dict) -> dict:
         kwargs["memory_root"] = config["memory_root"]
     if config.get("user_id") is not None:
         kwargs["user_id"] = config["user_id"]
+    if config.get("space") is not None:
+        kwargs["space"] = config["space"]
 
     # ── embedding：VoiceMem 的注入键名是 embedding ──
     if "embedding" in config:

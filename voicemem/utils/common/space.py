@@ -84,10 +84,25 @@ class MemorySpace:
 # 推出路径：目录名就是 space 名，文件名跟着它走（demo/ 里就是 demo.sqlite），
 # 这样把整个文件夹拷走还认得出是谁。
 
+def _pick(memory_root, suffix: str) -> Path:
+    """按目录名取文件；目录里已经有一个同后缀的就用它。
+
+    文件名跟着目录名走（demo/ 里就是 demo.sqlite），拷走整个文件夹还认得出是谁。
+    但**重命名或复制文件夹之后目录名就变了**，硬按新名字找会找不到、然后新建一个
+    空库——记忆看起来凭空没了（左脑还在，因为 vectors/ 不看名字，更难查）。
+    所以先按名字找，找不到就认目录里现成的那一个。
+    """
+    p = Path(memory_root)
+    want = p / f"{p.name}{suffix}"
+    if want.exists():
+        return want
+    existing = sorted(x for x in p.glob(f"*{suffix}") if x.is_file())
+    return existing[0] if existing else want
+
+
 def db(memory_root) -> Path:
     """这个 space 唯一的 sqlite。所有结构化存储都在里面，表名互不重叠。"""
-    p = Path(memory_root)
-    return p / f"{p.name}.sqlite"
+    return _pick(memory_root, ".sqlite")
 
 
 def json_path(memory_root) -> Path:
@@ -97,8 +112,7 @@ def json_path(memory_root) -> Path:
     左脑 json 镜像）走 sqlite 的 kv 表，见 ``kv_get`` / ``kv_set``。四份状态内容
     互不相同，塞进同一个 json 会互相覆盖。
     """
-    p = Path(memory_root)
-    return p / f"{p.name}.json"
+    return _pick(memory_root, ".json")
 
 
 # ── 小状态：存进 sqlite 的 kv 表，别再各开一个 json ──────────────────────────
@@ -145,8 +159,34 @@ def vectors(memory_root) -> Path:
     return d
 
 
+def check_dims(memory_root, dims: int) -> None:
+    """这个 space 是用多少维建的？跟当前 embedder 对不上就说人话。
+
+    维度是**空间的属性**：一个 space 里的向量必须同一个 embedder 产出的。
+    不检查的话，报错来自 qdrant 深处——``shapes (227,384) and (1536,) not
+    aligned``，看不出是"换了 embedding"造成的。
+    """
+    import json as _json
+    path = json_path(memory_root)
+    if not path.is_file():
+        return
+    try:
+        old = (_json.loads(path.read_text(encoding="utf-8")).get("mem0") or {}).get("dims")
+    except Exception:
+        return
+    if not old or int(old) == int(dims):
+        return
+    raise ValueError(
+        f"这个 memory space 是用 {old} 维的 embedding 建的，你现在用的是 {dims} 维。\n"
+        f"  space: {Path(memory_root)}\n"
+        f"一个 space 只能配一种 embedding。两个办法：\n"
+        f"  · 换个新 space：VoiceMem(space=\"我的名字\")\n"
+        f"  · 或者换回原来的 embedding（{old} 维通常是本地 E5，"
+        f"1536 维是 OpenAI text-embedding-3-small）")
+
+
 def describe(memory_root, *, user_id: str = "", mode: str = "",
-             counts: dict | None = None) -> dict:
+             dims: int | None = None, counts: dict | None = None) -> dict:
     """写/更新空间描述文件 ``<space>.json``，返回写进去的内容。
 
     分四块，跟论文里的结构对应：
@@ -195,6 +235,8 @@ def describe(memory_root, *, user_id: str = "", mode: str = "",
         },
         "mem0": {
             "role": "底层记忆引擎（向量检索）",
+            # 维度绑定这个 space：换 embedding 就得换 space，见 check_dims()
+            "dims": dims or (old.get("mem0") or {}).get("dims"),
             "vector_store": "qdrant (local)",
             "path": "vectors/",
             "collection": "voicemem",

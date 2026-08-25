@@ -198,6 +198,10 @@ class Mem0BackendStore:
         self._path = Path(memory_root)  # for parity with LocalMemoryStore._path (used by dev scripts)
 
         from voicemem.utils.common import space as _space
+        # 换了 embedding 又指向同一个 space 时，在这儿就说清楚，别等 qdrant 抛
+        # "shapes (n,384) and (1536,) not aligned"
+        _space.check_dims(memory_root, embedder.dimensions)
+        _space.describe(memory_root, dims=embedder.dimensions)
         qdrant_path = _space.vectors(memory_root)
         qdrant_path.mkdir(parents=True, exist_ok=True)
         cache_key = str(qdrant_path.resolve())

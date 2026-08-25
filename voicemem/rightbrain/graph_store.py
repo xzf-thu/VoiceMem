@@ -14,6 +14,8 @@ slot 下已有 entity 的 embedding 比相似度，够像就复用，不够像�
 
 from __future__ import annotations
 
+import os
+
 import json
 import sqlite3
 from dataclasses import dataclass, field
@@ -21,7 +23,15 @@ from pathlib import Path
 
 from voicemem.utils.common._graph_common import cosine as _cosine, new_id as _new_id, utc_iso as _utc_iso
 
-DEFAULT_MATCH_THRESHOLD = 0.65
+#: 同一个 slot 下，新标签跟已有实体像到什么程度就算同一个。
+#:
+#: 原来是 0.65——对 E5 的中文短语来说等于「全都合并」：实测基线本来就很高，
+#: 「讨厌吃饭吧唧嘴」跟「讨厌被打断」有 0.934，「讨厌开长会」跟它 0.922，全被
+#: 归成同一个实体。后果是右脑跑一阵之后再也不长新节点，用户说什么新东西图上
+#: 都没反应，看着像没记住。
+#: 实测真正该合并的那种（「喜欢手冲咖啡」↔「偏好手冲咖啡」）是 0.964，
+#: 0.95 正好把两类分开。
+DEFAULT_MATCH_THRESHOLD = float(os.environ.get("VOICEMEM_RB_ENTITY_MERGE", "0.95"))
 
 
 # 初始5个感性slot；description先留空，后续再补。
@@ -310,10 +320,14 @@ class RightBrainGraphStore:
             )
         return ent, True
 
-    def get_entities_for_slot(self, user_id: str, slot_id: str) -> list[RBEntity]:
+    def get_entities_for_slot(self, user_id: str, slot_id: str,
+                              *, newest_first: bool = False) -> list[RBEntity]:
+        """默认按名字排（稳定、便于展示）。``newest_first`` 按插入顺序倒排——
+        脑图要留几个席位给刚长出来的实体，按名字排的话新的排在哪全看它叫什么。"""
+        order = "rowid DESC" if newest_first else "name"
         with self._conn() as c:
             rows = c.execute(
-                "SELECT * FROM rb_entities WHERE user_id=? AND slot_id=? ORDER BY name",
+                f"SELECT * FROM rb_entities WHERE user_id=? AND slot_id=? ORDER BY {order}",
                 (user_id, slot_id),
             ).fetchall()
         return [_row_to_entity(r) for r in rows]

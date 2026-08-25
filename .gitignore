@@ -9,6 +9,7 @@ dist/
 tests/*
 !tests/test_offline_engine.py
 !tests/test_streaming.py
+!tests/test_demo_from_zero.py
 
 # 运行时数据：记忆库、评测结果、录音归档
 results/
@@ -50,4 +51,13 @@ node_modules/
 # 默认记忆根目录（不传 memory_root 时落在当前目录）
 voicemem_memory/
 examples/example_memory/
-voicemem_memoryspace/
+# 记忆空间：**目录结构**进仓库，里面的数据不进。
+# clone 下来是两个空文件夹——demo（跑 demo 用）和 myvoicemem（你自己的），
+# 谁跑谁自己积累，不把任何人的记忆推上去。
+voicemem_memoryspace/*
+!voicemem_memoryspace/demo/
+!voicemem_memoryspace/myvoicemem/
+voicemem_memoryspace/demo/*
+voicemem_memoryspace/myvoicemem/*
+!voicemem_memoryspace/demo/.gitkeep
+!voicemem_memoryspace/myvoicemem/.gitkeep

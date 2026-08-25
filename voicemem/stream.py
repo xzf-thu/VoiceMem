@@ -1,4 +1,4 @@
-"""voicemem 核心流式输入会话：边听边投机预取（EOU 0–500ms）。
+"""voicemem 核心流式输入会话：边听边投机预取（EOU 0–300ms）。
 
 和「文本」「wav」并列的第三种输入途径。两种喂法，每块都返回一个 ``StreamState``
 （这块 ``<speak>``/``<silence>``、说完那块是 ``turn_over`` + 投机预取的记忆 + ``Turn``）：
@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,7 +48,7 @@ class StreamState:
 
     下面那组感知字段（``emotion`` / ``speaker_id`` / ``speaker_voiceprint`` /
     ``entity`` / ``schema`` / ``text_embedding``）全是**取用时才算**的 property：
-    不读就一分钱一毫秒都不花，投机预取那条 0–500ms 的路径完全不受影响。
+    不读就一分钱一毫秒都不花，投机预取那条 0–300ms 的路径完全不受影响。
     """
     state: str                 # "<speak>" | "<silence>" | "turn_over"（一轮说完）
     text: str                  # 到目前为止的累积转写
@@ -184,6 +185,39 @@ def _embed(vm, text):
 #: 每轮最多留这么长的音频给按需感知用（16k 单声道，30s ≈ 1.9MB）
 _MAX_TURN_SAMPLES = 30 * 16000
 
+#: 开口前保留这么长的音频，免得切掉第一个字（16k 单声道）
+_PREROLL_SAMPLES = int(0.3 * 16000)
+
+#: 没有转写文本、但持续这么久的声音也算一轮（对着麦克风放音乐的场景）。
+#: 设长一点：短促的环境噪声（关门、咳嗽）不该变成一轮。
+MIN_SOUND_ONLY_S = float(os.environ.get("VOICEMEM_SOUND_ONLY_S", "5"))
+
+#: 纯声音的一轮，要静多久才算结束。
+#:
+#: 说话那一轮用 confirm_s（300ms）——对话就该这么快。但音乐不是对话：乐句之间的
+#: 停顿、弱拍、前奏后的留白，随便就超过 300ms，于是一首歌被切成一地碎片（实测
+#: 归档的录音全是 1.5~7.8 秒），回放时放出来只有开头几秒。
+#: 放音乐的场景本来也不需要秒回，等久一点换一段完整的录音，划算。
+SOUND_ONLY_SILENCE_S = float(os.environ.get("VOICEMEM_SOUND_ONLY_SILENCE_S", "3.0"))
+
+#: 这一块音频有没有声音（RMS 阈值）。
+#:
+#: 判"一轮结束"平时看 VAD，而 silero VAD 判的是**有没有人声**——音乐不是人声，
+#: 所以整段音乐在它眼里都是静音，静音计数一路涨，到 SOUND_ONLY_SILENCE_S 就把
+#: 这轮切断了。实测放一首歌，归档的录音只有 3.0 秒，正好等于那个阈值。
+#: 所以一个字都没转出来的时候改看能量：还有声音就不算静音，音乐放多久录多久。
+SOUND_LEVEL = float(os.environ.get("VOICEMEM_SOUND_LEVEL", "0.01"))
+
+#: 纯声音的一轮拿什么文本入库。
+#:
+#: 这一轮一个字都没转出来，直接 ingest("") 抽不出任何事实、也就没有记忆行，之后
+#: 问「刚才那首歌帮我重播」什么都找不到。给它一句话当载体。
+#:
+#: 但**必须是这个常量**，别在调用方各写各的字面量：核心靠它认出"这一轮其实没有
+#: 说话"（见 orchestrator 里的 _sound_only），认不出来就不会打 sound_only 标签，
+#: 回放挑候选时分不清"用户说话那轮"和"音乐那轮"，放出来是用户自己的声音。
+SOUND_ONLY_TEXT = "用户放了一段声音给我听。"
+
 
 class VoiceStream:
     """核心流式输入会话：边喂边投机，说完时交出 Turn。
@@ -218,7 +252,7 @@ class VoiceStream:
         #:     emotion="难过" → 情感记录 2 条 + 性格观察 1 条 + profile 2 条
         #:
         #: 但**本轮**的情绪读不得：``StreamState.emotion`` 是惰性属性，取一次要
-        #: 同步跑整套声学感知（实测 2.1s），投机预取那 0–500ms 的预算根本不够。
+        #: 同步跑整套声学感知（实测 2.1s），投机预取那 0–300ms 的预算根本不够。
         #: 所以调用方该把**上一轮** ingest 返回的 ``affect`` 写进来——情绪本来就有
         #: 连续性，代价是 0ms。
         self.emotion = emotion
@@ -240,6 +274,7 @@ class VoiceStream:
         self._last_memory = None   # 最新算好的投机记忆（SearchResult）
         self._pcm = []             # 本轮音频（16k 单声道），供 StreamState 按需做感知
         self._pcm_len = 0          # 已攒样本数，超上限就丢最早的（见 _MAX_TURN_S）
+        self._preroll = []         # 开口前的一小段，接在本轮开头（见 _PREROLL_SAMPLES）
 
     @property
     def asr(self):
@@ -305,6 +340,7 @@ class VoiceStream:
         self._text, self._silence, self._spoke = "", 0.0, False
         self._spec, self._spec_text, self._last_memory = None, "", None
         self._pcm, self._pcm_len = [], 0
+        self._preroll = []
 
     async def feed_text(self, text) -> Turn:
         """打字轮：直接投机一次返回 Turn。"""
@@ -337,17 +373,41 @@ class VoiceStream:
         frame = resample(np.frombuffer(pcm_bytes, np.int16).astype(np.float32) / 32768.0,
                          src=self.src_rate)
         self._text = self.asr.feed(frame)
-        # 攒本轮音频：StreamState 的感知字段按需取用。留个上限——VAD 迟迟不确认
-        # 说完时（比如一直有背景人声）这里会无界增长；声纹/情绪也用不着全程音频。
-        self._pcm.append(frame)
-        self._pcm_len += len(frame)
-        while self._pcm_len > _MAX_TURN_SAMPLES and len(self._pcm) > 1:
-            self._pcm_len -= len(self._pcm.pop(0))
         speaking = self.vad.is_speech(frame)
-        if speaking:
-            if self._silence > 0 and self._spec:           # barge-in：又开口了 → 丢弃这次投机
+
+        # 攒本轮音频：StreamState 的感知字段按需取用（声纹/情绪），也用来存档回放。
+        #
+        # 原来是**每一帧都攒**，包括你没说话的那些。于是两轮之间的静音一直往里堆，
+        # 堆到 30 秒上限，一句「早上好呀」存出来是 29.9 秒、RMS 0.005 的音频。
+        # 情绪模型拿到这个只会判「低能量 = 难过」——实测 emotion2vec / SenseVoice /
+        # 韵律三个模型在这种音频上全判难过，看着像模型不准，其实是喂错了东西。
+        #
+        # 现在只从**开口那一刻**开始录，前面留 PREROLL 秒不切掉字头。
+        if speaking or self._spoke:
+            if not self._spoke and self._preroll:      # 刚开口：把前摇接上
+                self._pcm.extend(self._preroll)
+                self._pcm_len += sum(len(f) for f in self._preroll)
+                self._preroll = []
+            self._pcm.append(frame)
+            self._pcm_len += len(frame)
+            while self._pcm_len > _MAX_TURN_SAMPLES and len(self._pcm) > 1:
+                self._pcm_len -= len(self._pcm.pop(0))
+        else:
+            self._preroll.append(frame)                # 还没开口：只留最近一小段
+            while sum(len(f) for f in self._preroll) > _PREROLL_SAMPLES and len(self._preroll) > 1:
+                self._preroll.pop(0)
+        # 还一个字都没转出来时，"有声音"就不算静音——那多半是音乐，而 VAD 只认
+        # 人声（见 SOUND_LEVEL）。已经有转写了就老老实实按 VAD 来，别让环境噪音
+        # 把一句话的结束拖住。
+        audible = speaking or (
+            not self._text.strip() and self._spoke
+            and float(np.sqrt(np.mean(frame * frame))) >= SOUND_LEVEL)
+        if audible:
+            if speaking and self._silence > 0 and self._spec:   # barge-in：又开口了 → 丢弃这次投机
                 self._spec.cancel(); self._spec, self._spec_text = None, ""
-            self._spoke, self._silence = True, 0.0
+            if speaking:
+                self._spoke = True
+            self._silence = 0.0
         else:
             self._silence += len(frame) / 16000.0
         if self._text.strip() and self.on_partial:
@@ -357,7 +417,17 @@ class VoiceStream:
                 (self._silence == 0.0 and len(self._text) >= self.spec_min_chars
                  or self._silence >= self.gamble_s):
             self._kick(self._text)
-        if self._spoke and self._silence >= self.confirm_s and self._text.strip():
+        # 一轮成立要有转写文本——否则每段环境噪声都会变成一轮。
+        # 但有个例外：**对着麦克风放音乐**。VAD 会把音乐判成人声（实测 357 块全
+        # 中），ASR 却一个字都转不出，于是永远不成一轮：没有记忆、没有存档音频，
+        # 之后问「刚才那首歌帮我重播」当然找不到。放够久（≥ MIN_SOUND_ONLY_S）
+        # 就当作一轮交出去，text 为空，由上层决定怎么记。
+        sound_only = (not self._text.strip()
+                      and self._pcm_len >= MIN_SOUND_ONLY_S * 16000)
+        # 一个字都没转出来的这一轮多半是音乐，别拿对话的 300ms 去切它，
+        # 见 SOUND_ONLY_SILENCE_S。
+        need_silence = self.confirm_s if self._text.strip() else SOUND_ONLY_SILENCE_S
+        if self._spoke and self._silence >= need_silence and (self._text.strip() or sound_only):
             flush = getattr(self._asr, "flush", None)      # 块式 ASR（paraformer）把不足
             if flush is not None:                          # 一块的尾巴补零吐出来
                 self._text = flush() or self._text

@@ -2,7 +2,7 @@
 
 和远程 ``OpenAILocalEmbedder``（``local_memory_store.py``，走 OpenAI Embeddings API）
 对称：这里用本地 ``intfloat/multilingual-e5-small`` 出向量，整条 Rank/存取都在
-0-500ms 投机预算内不碰网络。
+0-300ms 投机预算内不碰网络。
 
     from voicemem import VoiceMem
     from voicemem.leftbrain.local_e5_embedder import LocalE5Embedder
@@ -46,7 +46,7 @@ def shared_e5():
 
 
 class LocalE5Embedder:
-    """注入 VoiceMem(embedding=...)：Rank/存取的向量走本地 E5，0-500ms 预算内不碰网络。"""
+    """注入 VoiceMem(embedding=...)：Rank/存取的向量走本地 E5，0-300ms 预算内不碰网络。"""
 
     @property
     def model_name(self):

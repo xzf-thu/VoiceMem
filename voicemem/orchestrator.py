@@ -34,6 +34,7 @@ from __future__ import annotations
 from voicemem.utils.common import space as _space
 
 import os
+import time
 import re
 import threading
 from collections import deque
@@ -57,11 +58,9 @@ from voicemem.rightbrain.brain import (
     _is_en_text,
     _rb_blended_priority,
     _rb_ctx_to_hits,
-    _rb_emotion_trait_hit,
-    _rb_graph_hits,
     _rb_lang,
     _rb_mem_date,
-    _rb_relation_hits,
+    _rb_trait_hits,
     _render_rb_directive,
 )
 from voicemem.utils.defaults import default_utils
@@ -77,6 +76,11 @@ _NEED = {
     "text_mode":         ["embedding", "schema", "entity", "emotion", "memory_engine"],
     "multi_modal":       ["embedding", "schema", "entity", "emotion", "voiceprint", "asr", "memory_engine"],
 }
+
+
+#: 说了"给你听首歌"之后，多久之内的纯声音轮算作那首歌。
+#: 短一点更安全：说完一般紧接着就放，隔太久多半是另一回事了。
+EXPECT_MUSIC_S = float(os.environ.get("VOICEMEM_EXPECT_MUSIC_S", "120"))
 
 
 class Utils:
@@ -510,7 +514,7 @@ class Orchestrator:
         if merged_extraction.enabled():
             cached = merged_extraction.take_traits(text)
             if cached is not None:
-                valid = {"喜好与厌恶", "表达风格", "思维模式", "应对方式"}
+                valid = {"喜好与厌恶", "表达风格", "思维模式", "应对方式", "情绪"}
                 return [(s, l) for s, l in cached if s in valid and l]
 
         prompt = (
@@ -519,8 +523,15 @@ class Orchestrator:
             "- 喜好与厌恶：本能的喜欢/讨厌/偏好\n"
             "- 表达风格：说话/沟通方式和习惯\n"
             "- 思维模式：思考、判断、决策的习惯\n"
-            "- 应对方式：面对压力/负面情绪时怎么自我调节\n\n"
+            "- 应对方式：面对压力/负面情绪时怎么自我调节\n"
+            "- 情绪：什么情况下会有什么情绪。**必须写成一个规律，不是一个情绪词**：\n"
+            "  「评审前会紧张」「被打断就烦」「一个人待着会踏实」，不要写「焦虑」「开心」。\n"
+            "  这句话会成为脑图上一个节点的标题，光一个情绪词看不出是什么事。\n\n"
             "没有清晰体现的类别就不要输出。\n"
+            "**标签的写法**：它会成为脑图上一个节点的标题，所以写成一句短短的规律，\n"
+            "5-15 字，不要主语、不要句号：「讨厌被打断」「压力大时想被安抚」「先要结论」。\n"
+            "不要写成「用户倾向于详细规划和结构化思考。」这种带主语的整句，也不要\n"
+            "把原话或事实抄一遍。\n"
             '只输出 JSON：{"items": [{"slot": "喜好与厌恶", "label": "讨厌被打断"}, ...]}'
             '（items 可以是空列表 []）'
         )
@@ -531,7 +542,7 @@ class Orchestrator:
             items = _json.loads(raw).get("items", [])
         except Exception:
             return []
-        valid_slots = {"喜好与厌恶", "表达风格", "思维模式", "应对方式"}
+        valid_slots = {"喜好与厌恶", "表达风格", "思维模式", "应对方式", "情绪"}
         result = []
         for it in items:
             slot = str(it.get("slot", "")).strip()
@@ -1051,7 +1062,21 @@ class Orchestrator:
         # async_facts=True：事实抽取 + 图谱写入（耗时的部分）扔进后台线程，
         # Ingest() 立刻带着已同步算完的 audiomem 字段返回。默认 False。
         if async_facts:
-            threading.Thread(target=self._finish_ingest, args=(ctx,), daemon=True).start()
+            def _bg() -> None:
+                """后台入库。异常必须自己打出来。
+
+                线程里抛出去的异常没有任何人 await，表现是这一轮**凭空消失**——
+                日志里连"入库 0 条"都没有，库里也查不到，看着像 LLM 没抽出东西。
+                实测六轮连说丢掉两轮就是这么丢的，查了很久才定位到。
+                """
+                try:
+                    self._finish_ingest(ctx)
+                except Exception as e:
+                    import traceback
+                    print(f"[ingest] 这一轮没能入库（{type(e).__name__}: {e}）\n"
+                          f"{traceback.format_exc()}", flush=True)
+
+            threading.Thread(target=_bg, daemon=True).start()
             return {
                 "facts_count":         None,
                 "memory_ids":          [],
@@ -1154,6 +1179,94 @@ class Orchestrator:
                 )
             except Exception as e:
                 print(f"[ingest] 存助手原话失败：{e}", flush=True)
+
+        # 这一轮抽不出任何事实，但它确实是"放了段音乐给我听"：直接存一条，不走抽取。
+        # 抽取判断的是「这句话里有没有关于用户的事实」，而这一轮的价值不在话里，
+        # 在那段音频。没有记忆行的话，tune_id 无处可挂，之后问「刚才那首歌帮我
+        # 重播」什么都找不到。
+        #
+        # 两种算："声学认出是音乐"，或者"**人自己说了**这是音乐"。后者不能少：
+        # 识别走声学相似度，手机外放、环境吵、片段太短都会漏，而「我给你听首歌」
+        # 这句话本身比任何声学特征都确凿——偏偏它也抽不出事实（是个动作，不是
+        # 关于用户的事实），两头落空，那段录音就彻底进不了回放的候选池。
+        from voicemem.utils.audio.perceiver import said_music as _is_said_music
+        _said_music = _is_said_music(text)
+        _tune_id = getattr(tune_result, "tune_id", None) if tune_result else None
+
+        # 「说完就放」是最自然的顺序，而它恰好被切成**两轮**：一轮录音从检测到
+        # 人声开始、到 VAD 判定说完为止，所以「给你听一首歌啊」结束时这轮就存盘
+        # 了，音乐落在下一轮。
+        #
+        # 下一轮如果只有声音没有话，那它就是刚才说的那首歌——哪怕声学没认出来
+        # （外放、环境吵、片段短都会漏）。不认这一条的话，池子里只剩下他说话
+        # 那一轮，回放放出来是用户自己的声音，听感就是"音乐被截断了"。
+        # 纯声音轮：有录音，但一个字都没说。这本身就值得存——之后问「刚才那段
+        # 声音」「那首歌」时，它是最可能的答案。是不是音乐不一定（也可能是环境音），
+        # 所以只标 sound_only，tune: 留给"真认出来了 / 他说了 / 从上一轮继承"。
+        from voicemem.stream import SOUND_ONLY_TEXT
+        _sound_only = bool(audio_path) and (
+            not (text or "").strip() or (text or "").strip() == SOUND_ONLY_TEXT)
+
+        _expect = getattr(self, "_expect_music_until", 0.0)
+        _inherited = _sound_only and time.monotonic() < _expect
+        if _said_music:
+            self._expect_music_until = time.monotonic() + EXPECT_MUSIC_S
+        elif (text or "").strip():
+            self._expect_music_until = 0.0      # 又说了别的，意图作废
+        if _inherited:
+            print("  [music] 上一轮说了要放音乐，这一轮只有声音 → 就是那首", flush=True)
+
+        if not result.memory_ids and (_tune_id or _said_music or _inherited or _sound_only):
+            try:
+                heard = getattr(tune_result, "heard_count", 0) or 0
+                again = "（之前也听过）" if heard > 1 else ""
+                # 认出是音乐（或他自己说了）才叫"音乐"，否则如实说"一段声音"——
+                # 环境音、噪音也会走到这里，写成音乐是在编。
+                what = "音乐" if (_tune_id or _said_music or _inherited) else "声音"
+                _content = f"用户放了一段{what}给我听{again}。"
+                mid = self._get_repo()._vector_store.add_text(
+                    self._user_id, _content,
+                    metadata={"source": "sound_only", "turn_id": vi.id,
+                              **({"tune_id": _tune_id} if _tune_id else {}),
+                              **({"time_start": observed_at} if observed_at else {})},
+                )
+                if mid:
+                    # 上面 add_text 只写了**向量库**。memory_tags 的 memory_id 有
+                    # 外键指向 sqlite 的 memories 表，缺这一行的话紧接着写
+                    # tune:/scene:/speaker: 标签会撞 FOREIGN KEY constraint failed，
+                    # 而那个异常被下游 catch 成一行日志——表现是"音乐明明认出来了，
+                    # 库里却查不到 tune 标签"，回放只能退回按时间和文本猜。
+                    # 正常轮次不会遇到：它们的记忆是 append_extracted 写的，两边都进。
+                    try:
+                        from voicemem.leftbrain.cognitive_graph.slot_v2 import SlotV2
+                        self._get_repo()._cognitive_store.upsert_memory_record(
+                            self._user_id, mid, SlotV2.DAILY_LIFE, _content,
+                        )
+                        # 标出"这一轮的录音里**只有声音、没有说话**"。
+                        #
+                        # 一轮录音是从检测到人声开始、到 VAD 判定说完为止。所以
+                        # 「给你听一首歌啊」和后面那段音乐是**两轮**：前一轮存的是
+                        # 他自己那句话（背景里可能已经有音乐，于是也带 tune 标签），
+                        # 后一轮才是音乐本身。回放时要挑后者——挑错了放出来是
+                        # 用户自己的声音，听感就是"音乐被截断了"。
+                        # sound_only：这一轮的录音里只有声音、没有说话。
+                        # tune:*：这一轮是"音乐"——回放的候选池按 tune:% 查，
+                        #   少了它这条就进不去池子。声学认出来是哪首时
+                        #   perceiver 会再打一个真的 tune_id，不冲突；认不出来
+                        #   就只有 unidentified，确实不知道是哪首，别假装知道。
+                        tags = [("sound_only", 0.95)]
+                        if _tune_id:
+                            tags.append((f"tune:{_tune_id}", 0.9))
+                        elif _said_music or _inherited:
+                            # 确实不知道是哪首，别假装知道；但确定是"音乐"。
+                            tags.append(("tune:unidentified", 0.9))
+                        self._tag_memories([mid], tags)
+                    except Exception as e:
+                        print(f"[ingest] 音乐轮补写 memories 失败（标签会挂不上）：{e}",
+                              flush=True)
+                    result.memory_ids = list(result.memory_ids or []) + [mid]
+            except Exception as e:
+                print(f"[ingest] 存音乐轮失败：{e}", flush=True)
 
         # ── audiomem：场景/声纹标签写入 + 触发提醒 + 录音归档 + 主动推送 ─────────
         audiomem = self._write_audiomem_tags(

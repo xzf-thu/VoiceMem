@@ -100,6 +100,26 @@ def _is_junk(text: str) -> bool:
     return any(pat in text or pat in low for pat in _JUNK_PATTERNS)
 
 
+def _strip_request_clause(text: str) -> str:
+    """一条 memory 里既有长期事实、又有一次性请求时，把请求那半句切掉。
+
+    「我下周要考GRE，你有什么书推荐吗」会被抽成一条
+    「用户下周要参加GRE考试，并询问推荐的GRE书籍。」——整条命中 _JUNK_PATTERNS
+    的"询问推荐"，于是**连同"下周要考GRE"这个真事实一起丢掉**。实测就是这么丢的：
+    右脑存下了原话，左脑一条都没有，用户后面问起来完全想不起有这回事。
+
+    做法保守：只在最后一个逗号处切，切完必须仍是一句完整的事实（≥8 字、不再命中
+    junk），否则维持原样照旧丢弃——宁可漏记，也不要往库里塞半截话。
+    """
+    for sep in ("，并", "，还", "，同时", "，然后", "，", ", and ", ", "):
+        if sep not in text:
+            continue
+        head = text.rsplit(sep, 1)[0].strip().rstrip("，,")
+        if len(head) >= 8 and not _is_junk(head):
+            return head + ("。" if not head.endswith(("。", ".")) else "")
+    return ""
+
+
 def parse_additive_memory_response(raw_json: str) -> list[ExtractedAdditiveMemory]:
     data = json.loads(raw_json)
     if not isinstance(data, dict):
@@ -117,8 +137,13 @@ def parse_additive_memory_response(raw_json: str) -> list[ExtractedAdditiveMemor
         if not t:
             continue
         if _is_junk(t):
-            print(f"[extract] 丢弃（助手自己的话/一次性请求）：{t[:40]}", flush=True)
-            continue
+            kept = _strip_request_clause(t)
+            if kept:
+                print(f"[extract] 切掉请求那半句：{t[:36]} → {kept[:36]}", flush=True)
+                t = kept
+            else:
+                print(f"[extract] 丢弃（助手自己的话/一次性请求）：{t[:40]}", flush=True)
+                continue
         # 合并调用多带回来的标注：暂存给下游的 annotator 用，省掉那次 LLM 调用。
         # 字段缺了就什么都不存，annotator 查不到会照旧自己调一次。
         if any(k in item for k in ("slot", "entities", "relations")):
@@ -139,6 +164,10 @@ def parse_additive_memory_response(raw_json: str) -> list[ExtractedAdditiveMemor
                  for x in traits if isinstance(x, dict)]
         merged_extraction.put_traits(_MERGED_UTTERANCE.get("text", ""),
                                      [p for p in pairs if p[0] and p[1]])
+    emo = data.get("emotion")
+    if isinstance(emo, str):
+        from voicemem.leftbrain import merged_extraction
+        merged_extraction.put_emotion(_MERGED_UTTERANCE.get("text", ""), emo.strip())
     return out
 
 
@@ -286,10 +315,14 @@ class OpenAIMem0V3AdditiveExtractor:
 
         # 合并模式：让这一次调用顺便把 slot/实体/关系/右脑标签也吐出来，
         # 省掉下游 annotator 和 _extract_rb_traits 各自那次 LLM 往返。
+        #
+        # 追加到**用户消息**末尾。接在 system 后面时顶层的 emotion/traits 会被模型
+        # 丢掉（用户消息里的输出格式说明写死了顶层只有 "memory"，它照做），
+        # 右脑于是每轮都拿到空的，一个节点都长不出来。见 merged_extraction。
         from voicemem.leftbrain import merged_extraction
         system = self._system
         if merged_extraction.enabled():
-            system = system + merged_extraction.prompt_addendum()
+            user_content = user_content + merged_extraction.prompt_addendum()
             _MERGED_UTTERANCE["text"] = " ".join(
                 (m.get("content") or "") for m in new_messages
                 if (m.get("role") or "user") != "assistant").strip()
@@ -533,6 +566,21 @@ class ConflictResolver:
 
         user_content = _build_update_memory_message(indexed, new_facts, speaker_name=speaker_name,
                                                     system_prompt=self._system)
+        # 上游那个 prompt 要求**对每条候选都输出一个决定**，包括 "event":"NONE"。
+        # 候选是按相似度取的（每条新事实 top-15 + 属性 top-10），实测一轮 25 条，
+        # 于是模型要吐 25 个 JSON 对象、其中二十几个是 NONE——这一次调用就要 10.2s，
+        # 占整轮 ingest 的一半，而且库越大越慢。
+        # 改成只吐真正要动的那几条：没被提到的一律当 NONE。消费端本来就是按事件
+        # 遍历、不假设一一对应（voice_input.py "若 resolve 成功，按决策执行"），
+        # 所以少几条 NONE 不影响任何行为。
+        if os.environ.get("VOICEMEM_RESOLVE_OMIT_NONE", "1") != "0":
+          user_content += (
+            "\n\nIMPORTANT — output size:\n"
+            "Return ONLY the memories whose event is ADD, UPDATE or DELETE.\n"
+            "OMIT every memory you would mark NONE — anything absent from your\n"
+            "output is treated as NONE. Most turns change nothing, so "
+            '{"memory": []} is a normal and correct answer.'
+          )
 
         resp = client.chat.completions.create(
             model=self._cfg.resolved_model(),
