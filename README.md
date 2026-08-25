@@ -24,7 +24,7 @@
     <img src="https://img.shields.io/badge/X-@XieZhifei14110-black?logo=x&logoColor=white" alt="X">
   </a>
   <a href="https://xzf-thu.github.io">
-    <img src="https://img.shields.io/badge/Contact-Me-blue" alt="Contact Me">
+    <img src="https://img.shields.io/badge/Personal-Contact-blue" alt="Personal Contact">
   </a>
 </p>
 
@@ -250,7 +250,7 @@ VoiceMem 不把所有记忆放进同一个检索数据库，而是将记忆拆�
 * ⚡ **低延迟** — 响应时间为 **134 ms**，Mem0 为 **1,440 ms**，并支持在语音轮次内部进行流式检索。
 * 💰 **低 Token 消耗** — 每次只使用 **430 个记忆 token**，Mem0 为 **6,956**，EverMemOS 为 **1,899**。
 
----
+
 
 ## 🤖 VoiceMem 模型系列
 
@@ -418,7 +418,7 @@ VoiceMem 基于 **Apache License 2.0** 开源。
     <img src="https://img.shields.io/badge/X-@XieZhifei14110-black?logo=x&logoColor=white" alt="X">
   </a>
   <a href="https://xzf-thu.github.io">
-    <img src="https://img.shields.io/badge/Contact-Me-blue" alt="Contact Me">
+    <img src="https://img.shields.io/badge/Personal-Contact-blue" alt="Personal Contact">
   </a>
 </p>
 
