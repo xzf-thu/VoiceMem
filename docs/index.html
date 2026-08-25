@@ -831,7 +831,7 @@
     <div class="ft"><span id="c-src">voice · 00:00</span><span>— — —</span></div>
   </div>
   <div class="topbar">
-    <div class="logos"><a href="#" aria-label="VoiceMem"><img src="./images/image_all.webp"
+    <div class="logos"><a href="#shell" aria-label="VoiceMem"><img src="./images/image_all.webp"
          alt="VoiceMem" onerror="this.setAttribute('data-missing','')" /><span class="logo-fb">VoiceMem</span></a></div>
     <nav class="topnav">
       <div class="tlink lang" id="nav-lang" tabindex="0">Language
@@ -843,8 +843,8 @@
           <a href="#" data-lang="ko">한국어</a>
         </div></div>
       </div>
-      <a href="#" class="tlink" id="nav-contact">Contact</a>
-      <a href="#" class="cta" id="nav-start">Get Started<span class="ar">→</span></a>
+      <a href="https://xzf-thu.github.io" class="tlink" id="nav-contact" target="_blank" rel="noopener noreferrer">Contact</a>
+      <a href="https://github.com/xzf-thu/VoiceMem" class="cta" id="nav-start" target="_blank" rel="noopener noreferrer">Get Started<span class="ar">→</span></a>
     </nav>
   </div>
 
@@ -892,8 +892,8 @@
 
   <div class="glass">
     <button type="button" id="btn-explore"><span class="d b"></span>Explore</button>
-    <a href="#" id="btn-code"><span class="d p"></span>Code</a>
-    <a href="#" id="btn-paper"><span class="d g"></span>Paper</a>
+    <a href="https://github.com/xzf-thu/VoiceMem" id="btn-code" target="_blank" rel="noopener noreferrer"><span class="d p"></span>Code</a>
+    <a href="https://arxiv.org/abs/2605.19833" id="btn-paper" target="_blank" rel="noopener noreferrer"><span class="d g"></span>Paper</a>
   </div>
   <div id="cue">Scroll<i></i></div>
   <div id="veil"></div>
@@ -930,9 +930,9 @@
   </header>
   <main class="wrap">
     <nav class="tabs" aria-label="VoiceMem examples">
-      <button class="tab active" data-tab="offline" data-i18n="quick.sdk">SDK Integration</button>
-      <button class="tab" data-tab="online" data-i18n="quick.runtime">Agent Runtime</button>
-      <button class="tab" data-tab="chat" data-i18n="quick.agent">Voice Agent</button>
+      <button class="tab active" data-tab="offline" data-i18n="quick.sdk">Offline Engine</button>
+      <button class="tab" data-tab="online" data-i18n="quick.runtime">Streaming</button>
+      <button class="tab" data-tab="chat" data-i18n="quick.agent">Web Demo</button>
     </nav>
     <section class="window">
       <div class="titlebar">
@@ -942,22 +942,21 @@
 <div class="panel active" id="offline">
         <div class="code-wrap">
           <button class="copy" aria-label="Copy code" title="Copy">⧉</button>
-          <pre><code><span class="line"><span class="comment"># 1. Install VoiceMem core</span></span><span class="line">pip install -e .</span><span class="line"></span><span class="line"><span class="kw">from</span> voicemem <span class="kw">import</span> VoiceMem</span><span class="line">vm = VoiceMem()</span><span class="line"></span><span class="line">vm.Ingest(<span class="str">"Had ramen with Alex near the office at noon."</span>, speaker=<span class="str">"Speaker 0"</span>)</span><span class="line">result = vm.Search(<span class="str">"what did I eat for lunch"</span>, slots=[<span class="str">"food"</span>])</span><span class="line"><span class="kw">for</span> hit <span class="kw">in</span> result.hits:</span><span class="line">    print(hit)</span></code></pre>
+          <pre><code><span class="line"><span class="comment"># 1. Install VoiceMem (ASR / voiceprint / scene / emotion / embedding built in)</span></span><span class="line">pip install voicemem</span><span class="line"></span><span class="line"><span class="kw">from</span> voicemem <span class="kw">import</span> VoiceMem</span><span class="line"></span><span class="line">vm = VoiceMem(mode=<span class="str">"normal"</span>, openai_key=<span class="str">"api_xxx"</span>, top_k=5)</span><span class="line">vm.warmup()                          <span class="comment"># local models are lazy-loaded</span></span><span class="line"></span><span class="line"><span class="comment"># 2. Ingest audio — ASR, voiceprint, scene, emotion and embedding run inside</span></span><span class="line">vm.ingest(audio=<span class="str">"assets/input.wav"</span>)   <span class="comment"># "I'm vegetarian, allergic to nuts."</span></span><span class="line"></span><span class="line"><span class="comment"># 3. Search — pure vector retrieval, decoupled from ingestion</span></span><span class="line">result = vm.search(<span class="str">"What are my dietary restrictions?"</span>)</span><span class="line">print(result.result_leftbrain, result.result_rightbrain)</span></code></pre>
         </div>
       </div>
       <div class="panel" id="online">
         <div class="code-wrap">
           <button class="copy" aria-label="Copy code" title="Copy">⧉</button>
-          <pre><code><span class="line"><span class="comment"># 1. Install audio / environment / speaker features</span></span><span class="line">pip install -e <span class="str">".[audio,environment,omni,voiceprint]"</span></span><span class="line">bash scripts/download_models.sh service/models</span><span class="line"></span><span class="line"><span class="comment"># 2. Start the streaming voice service (adjust entrypoint to your repo)</span></span><span class="line">export OPENAI_API_KEY=<span class="str">"your-api-key"</span></span><span class="line">python service/main.py</span><span class="line"></span><span class="line"><span class="comment"># Per utterance → end, ASR, entities, schema, emotion, speaker, embedding</span></span><span class="line"><span class="comment"># Browser/client connects to the service WebSocket endpoint.</span></span></code></pre>
+          <pre><code><span class="line"><span class="comment"># 1. The streaming interface behaves like a VAD that keeps eating audio</span></span><span class="line">stream = vm.stream(src_rate=sr, vad_threshold=0.5, on_partial=on_partial)</span><span class="line">step = <span class="kw">int</span>(sr * .032)</span><span class="line"></span><span class="line"><span class="kw">for</span> i <span class="kw">in</span> <span class="kw">range</span>(0, <span class="kw">len</span>(pcm), step):</span><span class="line">    st = <span class="kw">await</span> stream.feed(pcm[i:i + step].tobytes())</span><span class="line">    <span class="kw">if</span> st.state != <span class="str">"turn_over"</span>:</span><span class="line">        <span class="kw">continue</span></span><span class="line"></span><span class="line">    <span class="comment"># 2. Memory was already retrieved while the user was still speaking</span></span><span class="line">    print(st.transcript, st.result_leftbrain, st.result_rightbrain)</span><span class="line">    print(st.speaker_id, st.emotion, st.entity, st.schema)</span><span class="line"></span><span class="line">    <span class="comment"># 3. Every turn goes through one ingestion decision</span></span><span class="line">    res = vm.ingest(st.transcript)</span></code></pre>
         </div>
       </div>
       <div class="panel" id="chat">
         <div class="code-wrap">
           <button class="copy" aria-label="Copy code" title="Copy">⧉</button>
-          <pre><code><span class="line"><span class="comment"># 1. Use the maintained browser voice demo</span></span><span class="line">cd openai_voice_demo</span><span class="line">export OPENAI_API_KEY=<span class="str">"your-api-key"</span></span><span class="line"></span><span class="line"><span class="comment"># 2. Start the app (adjust filename to your actual demo entrypoint)</span></span><span class="line">python app.py</span><span class="line"></span><span class="line"><span class="comment"># 3. Open the local UI</span></span><span class="line">http://localhost:3000</span><span class="line"><span class="comment"># Talk directly with the agent while VoiceMem handles memory.</span></span></code></pre>
+          <pre><code><span class="line"><span class="comment"># 1. Clone the repo — the demo lives here, pip ships the library only</span></span><span class="line">git clone https://github.com/xzf-thu/VoiceMem.git</span><span class="line">cd VoiceMem</span><span class="line"></span><span class="line"><span class="comment"># 2. Pull the default models</span></span><span class="line">pip install -U huggingface_hub</span><span class="line">hf download zhifeixie/VoiceMem_Default_Models_Env --local-dir ./models</span><span class="line"></span><span class="line"><span class="comment"># 3. Start the interactive web demo</span></span><span class="line">export OPENAI_API_KEY=sk-...</span><span class="line">python web/run.py</span><span class="line"></span><span class="line"><span class="comment"># 4. Then open the local UI</span></span><span class="line">http://localhost:8787</span></code></pre>
         </div>
       </div>
-    
     </section>
   </main>
 </section>
@@ -983,14 +982,14 @@
       <figure class="in-fig"><img loading="lazy" decoding="async" width="1192" height="585" src="./images/fig-opd.webp" alt="VoiceMem training and data flow" /></figure>
       <p class="in-say" data-i18n="intro.opdBody">ChatMem-400K is produced by a three-stage pipeline of memory-world construction, SLM-validated online on-policy distillation, and human refinement; the same pipeline also produces the ChatMem-Bench evaluation set. After OPD distillation, Qwen2.5-Omni, Qwen3-Omni, and Step-Audio2-Mini learn to proactively invoke memory without sacrificing their original speech capabilities.</p>
       <div class="hf-row">
-        <a class="hf-card" href="https://huggingface.co/datasets/VoiceMem/ChatMem-400K" target="_blank" rel="noopener noreferrer">
+        <a class="hf-card" href="https://huggingface.co/datasets/zhifeixie/VoiceMem-ChatMem400k" target="_blank" rel="noopener noreferrer">
           <img class="hf-logo" src="data:image/svg+xml;utf8,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Cdefs%3E%3ClinearGradient%20id='g'%20x1='0'%20y1='0'%20x2='0'%20y2='1'%3E%3Cstop%20offset='0'%20stop-color='%23FFE55C'/%3E%3Cstop%20offset='0.45'%20stop-color='%23FFD21E'/%3E%3Cstop%20offset='1'%20stop-color='%23FFAA00'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle%20cx='50'%20cy='48'%20r='33'%20fill='url(%23g)'/%3E%3Cellipse%20cx='38.5'%20cy='42'%20rx='4.6'%20ry='6'%20fill='%2332343D'/%3E%3Cellipse%20cx='61.5'%20cy='42'%20rx='4.6'%20ry='6'%20fill='%2332343D'/%3E%3Cpath%20d='M35%2057c4.2%208.4%2010.6%2012%2015%2012s10.8-3.6%2015-12'%20fill='none'%20stroke='%2332343D'%20stroke-width='5.4'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3Cg%20fill='url(%23g)'%20stroke='%23E9A400'%20stroke-width='2.2'%20stroke-linejoin='round'%3E%3Cpath%20d='M22%2064c-7%201-12%206-13.5%2012.5-0.8%203.6%202%206.5%205.4%205.6L27%2078c3-0.8%204.4-4.2%202.7-6.8L25.6%2065c-0.8-1-2-1.4-3.6-1z'/%3E%3Cpath%20d='M78%2064c7%201%2012%206%2013.5%2012.5%200.8%203.6-2%206.5-5.4%205.6L73%2078c-3-0.8-4.4-4.2-2.7-6.8L74.4%2065c0.8-1%202-1.4%203.6-1z'/%3E%3C/g%3E%3C/svg%3E" alt="Hugging Face" width="40" height="40" />
-          <span class="hf-body"><small data-i18n="intro.dataset">Dataset</small><b>VoiceMem/ChatMem-400K</b></span>
+          <span class="hf-body"><small data-i18n="intro.dataset">Dataset</small><b>zhifeixie/VoiceMem-ChatMem400k</b></span>
           <span class="hf-go" aria-hidden="true">&#8599;</span>
         </a>
-        <a class="hf-card" href="https://huggingface.co/VoiceMem/Qwen2.5-Omni-Mem" target="_blank" rel="noopener noreferrer">
+        <a class="hf-card" href="https://huggingface.co/zhifeixie/VoiceMem_MF_Qwen3_6_35B_A3B_Qlora" target="_blank" rel="noopener noreferrer">
           <img class="hf-logo" src="data:image/svg+xml;utf8,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Cdefs%3E%3ClinearGradient%20id='g'%20x1='0'%20y1='0'%20x2='0'%20y2='1'%3E%3Cstop%20offset='0'%20stop-color='%23FFE55C'/%3E%3Cstop%20offset='0.45'%20stop-color='%23FFD21E'/%3E%3Cstop%20offset='1'%20stop-color='%23FFAA00'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle%20cx='50'%20cy='48'%20r='33'%20fill='url(%23g)'/%3E%3Cellipse%20cx='38.5'%20cy='42'%20rx='4.6'%20ry='6'%20fill='%2332343D'/%3E%3Cellipse%20cx='61.5'%20cy='42'%20rx='4.6'%20ry='6'%20fill='%2332343D'/%3E%3Cpath%20d='M35%2057c4.2%208.4%2010.6%2012%2015%2012s10.8-3.6%2015-12'%20fill='none'%20stroke='%2332343D'%20stroke-width='5.4'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3Cg%20fill='url(%23g)'%20stroke='%23E9A400'%20stroke-width='2.2'%20stroke-linejoin='round'%3E%3Cpath%20d='M22%2064c-7%201-12%206-13.5%2012.5-0.8%203.6%202%206.5%205.4%205.6L27%2078c3-0.8%204.4-4.2%202.7-6.8L25.6%2065c-0.8-1-2-1.4-3.6-1z'/%3E%3Cpath%20d='M78%2064c7%201%2012%206%2013.5%2012.5%200.8%203.6-2%206.5-5.4%205.6L73%2078c-3-0.8-4.4-4.2-2.7-6.8L74.4%2065c0.8-1%202-1.4%203.6-1z'/%3E%3C/g%3E%3C/svg%3E" alt="Hugging Face" width="40" height="40" />
-          <span class="hf-body"><small data-i18n="intro.model">Model</small><b>VoiceMem/Qwen2.5-Omni-Mem</b></span>
+          <span class="hf-body"><small data-i18n="intro.model">Model</small><b>zhifeixie/VoiceMem_MF_Qwen3</b></span>
           <span class="hf-go" aria-hidden="true">&#8599;</span>
         </a>
       </div>
@@ -1011,7 +1010,7 @@
       <div class="bn-hero">
         <div class="bn-hero-top"><h3>LoCoMo</h3><span data-i18n="bench.locomoLabel">Long-horizon factual memory</span></div>
         <div class="bn-hero-num"><strong>91.2</strong><em>%</em>
-          <div class="bn-hero-side"><b>VoiceMem @ K=5</b><span data-i18n="bench.locomoBody">Five memories. 302 tokens. Best score on the board.</span></div>
+          <div class="bn-hero-side"><b>VoiceMem @ K=5</b><span data-i18n="bench.locomoBody">Five memories. 430 tokens. Best score on the board.</span></div>
         </div>
       </div>
       <div class="bn-hero">
@@ -1021,7 +1020,7 @@
         </div>
       </div>
     </div>
-    <p class="bn-strip"><b>VoiceMem</b><i></i><b>K=5</b> <span data-i18n="bench.deploy">deployment point</span><i></i><b>302</b> <span data-i18n="bench.tokens">mean memory tokens on LoCoMo</span></p>
+    <p class="bn-strip"><b>VoiceMem</b><i></i><b>K=5</b> <span data-i18n="bench.deploy">deployment point</span><i></i><b>430</b> <span data-i18n="bench.tokens">mean memory tokens on LoCoMo</span></p>
     <div class="bn-grid">
       <article class="bp">
           <div class="bp-h"><div><h3 data-i18n="bench.accuracy">Accuracy</h3></div><span class="bp-dir" data-i18n="bench.higher">HIGHER ↑</span></div>
@@ -1043,7 +1042,7 @@
           <div class="bp-h"><div><h3 data-i18n="bench.memoryTokens">Memory tokens</h3></div><span class="bp-dir" data-i18n="bench.lower">LOWER ↓</span></div>
           <div class="row"><span class="rn">Mem0</span><span class="rt"><i style="width:96.6%"></i></span><span class="rv">6,956</span></div>
           <div class="row"><span class="rn">EverMemOS</span><span class="rt"><i style="width:26.4%"></i></span><span class="rv">1,899</span></div>
-          <div class="row is-vm"><span class="rn">VoiceMem</span><span class="rt"><i style="width:4.2%"></i></span><span class="rv">302</span></div>
+          <div class="row is-vm"><span class="rn">VoiceMem</span><span class="rt"><i style="width:6.2%"></i></span><span class="rv">430</span></div>
         </article>
       <article class="bp">
           <div class="bp-h"><div><h3 data-i18n="bench.latency">Latency</h3></div><span class="bp-dir" data-i18n="bench.lower">LOWER ↓</span></div>
@@ -1131,12 +1130,12 @@
 <section id="closing-cta" aria-labelledby="closing-title">
   <div class="closing-inner">
     <h2 class="closing-title" id="closing-title" data-i18n="closing.title">Start building voice intelligence with soul</h2>
-    <a class="closing-btn" href="#page3" data-i18n="closing.button">Start Building</a>
+    <a class="closing-btn" href="https://github.com/xzf-thu/VoiceMem" target="_blank" rel="noopener noreferrer" data-i18n="closing.button">Start Building</a>
   </div>
 </section>
 <footer id="site-end">
   <span class="end-brand">VoiceMem</span>
-  <a href="#" data-i18n="closing.contact">Contact us</a>
+  <a href="https://xzf-thu.github.io" target="_blank" rel="noopener noreferrer" data-i18n="closing.contact">Contact us</a>
 </footer>
 
 
@@ -1187,12 +1186,18 @@ const UI = {
   discCurve:   0.22,   // how round the rim looks — RY / RX of the top ellipse
 
   // ---- when the cortex starts answering --------------------------------
-  firstQuery:  1.20,   // seconds after load before the FIRST query runs. Visitors
-                       //   scroll away fast — this used to be 4.2s and most of
-                       //   them never saw a single query fire.
+  firstQuery:  0.10,   // seconds after load before the FIRST query runs. Visitors
+                       //   scroll away fast, so the beams fire on arrival —
+                       //   this used to be 4.2s and most of them never saw one.
+  firstRate:   3.20,   // the FIRST query only, played at this multiple of normal
+                       //   speed, so a whole ask -> store -> answer cycle is over
+                       //   inside the first three seconds. Every later query runs
+                       //   at 1.0 — this is a trailer, not the pace of the piece.
   queryGap:    3.60,   // seconds of quiet between queries after the first
   queryJitter: 1.60,   // random extra added to the gap, so it never feels metronomic
-  nodeDelay:   0.55,   // how long the node fade-in staggers across the plate
+  nodeDelay:   0.22,   // how long the node fade-in staggers across the plate.
+                       //   Kept short: the opening beams must have somewhere to
+                       //   land the moment they leave the centre.
 
   // ---- how the graph grows -------------------------------------------
   seedShare:   0.50,   // share of the memories present at load, per hemisphere
@@ -1996,7 +2001,10 @@ document.querySelectorAll('.key').forEach(el=>{
    ===================================================================== */
 const SR = { st:'idle', t:0, beams:[], endT:0, hops:[], drops:[], dumpT:0,
              vis:[], origin:null, cool:UI.firstQuery, scanA:0, arrived:0,
-             fading:false, doneAt:-1, rets:[], retT:0, outT:0 };
+             fading:false, doneAt:-1, rets:[], retT:0, outT:0,
+             /* every clock inside the query runs through this. It drops back to
+                1 the moment the opening query has played out. */
+             rate:UI.firstRate };
 const AUTO = !REDUCED;
 function live(id){ return N[id].sh === 1; }
 function pickNb(id, pred, avoid){
@@ -2085,6 +2093,9 @@ function beamFn(b){
     return [iu*iu*p0[0]+2*iu*u*cx+u*u*p1[0], iu*iu*p0[1]+2*iu*u*cy+u*u*p1[1]]; };
 }
 function stepSearch(dt, tNow){
+  // one dial drives the whole state machine, so the opening query can be
+  // played fast without any of its stages drifting out of step
+  dt *= SR.rate;
   if(SR.st==='idle'){
     SR.scanA = Math.max(0, SR.scanA - dt*0.9);
     if(AUTO && !GROW.live && (SR.cool -= dt) <= 0){ SR.cool = UI.queryGap + Math.random()*UI.queryJitter; startSearch(); }
@@ -2152,6 +2163,7 @@ function stepSearch(dt, tNow){
     SR.scanA = Math.max(0, SR.scanA - dt*0.9);
     if(SR.outT > 1.05){
       SR.st = 'idle';
+      SR.rate = 1;            // the trailer is over; settle into the real tempo
       const span = onQuery();
       SR.cool = 0.9 + span + Math.random()*1.0;
     }
@@ -2738,8 +2750,12 @@ function updateCard(t){
 
 document.getElementById('btn-explore').addEventListener('click', e=>{
   e.preventDefault();
+  /* kick a query off so the cortex is alive behind the veil, then hand the
+     visitor down to page two, which is what EXPLORE promises. */
   if(SR.st!=='idle'){ SR.st='idle'; }
   SR.cool = 0; startSearch();
+  const p2 = document.getElementById('page2');
+  if(p2) p2.scrollIntoView({behavior:'smooth', block:'start'});
 });
 
 /* =======================================================================
@@ -2858,7 +2874,7 @@ else brain.addEventListener('load', plateLoaded);
 
 <script id="voicemem-i18n-v1">
 (function(){
-  const I18N = {"en": {"demo.title": "Demo", "demo.say": "Talk to it once. It knows you next time.", "demo.watch": "Watch on YouTube", "quick.title": "Quick Start", "quick.say": "Memory for your voice AI, in a few lines.", "quick.sdk": "SDK Integration", "quick.runtime": "Agent Runtime", "quick.agent": "Voice Agent", "intro.title": "Introduction", "intro.say": "Two brains. One voice. Nothing to wait for.", "intro.archTitle": "Streaming dual-brain architecture", "intro.archBody": "The left brain organizes factual memory through schemas and entities, while the right brain models personality and emotion with independent and cross-entity nodes. The entire pipeline is streaming: while the user is still speaking, audio is segmented, transcribed, extracted, and written into the graph. At query time, VoiceMem routes first, ranks second, and injects only the Top-K memories into context.", "intro.opdTitle": "Datasets and voice-model family built with OPD", "intro.opdBody": "ChatMem-400K is produced by a three-stage pipeline of memory-world construction, SLM-validated online on-policy distillation, and human refinement; the same pipeline also produces the ChatMem-Bench evaluation set. After OPD distillation, Qwen2.5-Omni, Qwen3-Omni, and Step-Audio2-Mini learn to proactively invoke memory without sacrificing their original speech capabilities.", "intro.dataset": "Dataset", "intro.model": "Model", "bench.title": "Benchmarking", "bench.say": "More accurate. Fewer tokens. Near-zero latency inside the voice turn.", "bench.locomoLabel": "Long-horizon factual memory", "bench.locomoBody": "Five memories. 302 tokens. Best score on the board.", "bench.personaLabel": "Personalized memory", "bench.personaBody": "It remembers who you are, not just what you said.", "bench.deploy": "deployment point", "bench.tokens": "mean memory tokens on LoCoMo", "bench.accuracy": "Accuracy", "bench.higher": "HIGHER ↑", "bench.lower": "LOWER ↓", "bench.memoryTokens": "Memory tokens", "bench.latency": "Latency", "apps.title": "Applications", "apps.say": "Build it with VoiceMem.", "closing.title": "Start building voice intelligence with soul", "closing.button": "Start Building", "closing.contact": "Contact us"}, "zh-CN": {"demo.title": "演示", "demo.say": "只需聊一次，下次它就记得你。", "demo.watch": "在 YouTube 观看", "quick.title": "快速开始", "quick.say": "只需几行代码，为你的语音 AI 加上记忆。", "quick.sdk": "SDK 集成", "quick.runtime": "智能体运行时", "quick.agent": "语音智能体", "intro.title": "介绍", "intro.say": "双脑协同，一个声音，无需等待。", "intro.archTitle": "流式 dual-brain 架构", "intro.archBody": "左脑以 schema 和实体组织事实记忆，右脑以独立与跨实体节点建模人格与情绪。整条链路全流式——用户还在说话时就已完成切分、转写、抽取并入图，查询时先路由后排序，只取 Top-K 拼进上下文。", "intro.opdTitle": "基于 OPD 构建的数据集与语音模型系列", "intro.opdBody": "ChatMem-400K 由记忆世界构建、SLM 验证的在线同策略蒸馏与人工精修三段流水线产出，并同时生成 ChatMem-Bench 评测集。Qwen2.5-Omni、Qwen3-Omni 与 Step-Audio2-Mini 经 OPD 蒸馏后学会主动调用记忆，且不损失原有语音能力。", "intro.dataset": "数据集", "intro.model": "模型", "bench.title": "基准测试", "bench.say": "更准确，更少 token，并且几乎无延迟地在 voice turn 内完成。", "bench.locomoLabel": "长时程事实记忆", "bench.locomoBody": "仅五条记忆、302 tokens，取得全榜最佳成绩。", "bench.personaLabel": "个性化记忆", "bench.personaBody": "它记住的是你是谁，而不只是你说过什么。", "bench.deploy": "部署点", "bench.tokens": "LoCoMo 平均记忆 tokens", "bench.accuracy": "准确率", "bench.higher": "越高越好 ↑", "bench.lower": "越低越好 ↓", "bench.memoryTokens": "记忆 tokens", "bench.latency": "延迟", "apps.title": "应用", "apps.say": "和 VoiceMem 一起构建。", "closing.title": "开始构建有灵魂的 voice intelligence", "closing.button": "开始构建", "closing.contact": "联系我们"}, "zh-TW": {"demo.title": "示範", "demo.say": "只要聊一次，下次它就記得你。", "demo.watch": "在 YouTube 觀看", "quick.title": "快速開始", "quick.say": "只需幾行程式碼，為你的語音 AI 加上記憶。", "quick.sdk": "SDK 整合", "quick.runtime": "代理執行環境", "quick.agent": "語音代理", "intro.title": "介紹", "intro.say": "雙腦協同，一個聲音，無需等待。", "intro.archTitle": "串流 dual-brain 架構", "intro.archBody": "左腦以 schema 與實體組織事實記憶，右腦以獨立與跨實體節點建模人格與情緒。整條鏈路皆為串流——使用者仍在說話時，就已完成切分、轉寫、抽取並寫入圖譜；查詢時先路由、再排序，只將 Top-K 記憶放入上下文。", "intro.opdTitle": "以 OPD 建構的資料集與語音模型系列", "intro.opdBody": "ChatMem-400K 由記憶世界建構、SLM 驗證的線上同策略蒸餾與人工精修三階段流程產出，並同步生成 ChatMem-Bench 評測集。Qwen2.5-Omni、Qwen3-Omni 與 Step-Audio2-Mini 經 OPD 蒸餾後學會主動調用記憶，且不犧牲原有語音能力。", "intro.dataset": "資料集", "intro.model": "模型", "bench.title": "基準測試", "bench.say": "更準確、更少 token，並且幾乎零延遲地在 voice turn 內完成。", "bench.locomoLabel": "長期事實記憶", "bench.locomoBody": "只需五條記憶、302 tokens，拿下全榜最佳成績。", "bench.personaLabel": "個人化記憶", "bench.personaBody": "它記得你是誰，而不只是你說過什麼。", "bench.deploy": "部署點", "bench.tokens": "LoCoMo 平均記憶 tokens", "bench.accuracy": "準確率", "bench.higher": "越高越好 ↑", "bench.lower": "越低越好 ↓", "bench.memoryTokens": "記憶 tokens", "bench.latency": "延遲", "apps.title": "應用", "apps.say": "和 VoiceMem 一起打造。", "closing.title": "開始構建有靈魂的 voice intelligence", "closing.button": "開始建置", "closing.contact": "聯絡我們"}, "ja": {"demo.title": "デモ", "demo.say": "一度話すだけ。次からは、あなたを覚えています。", "demo.watch": "YouTube で見る", "quick.title": "クイックスタート", "quick.say": "数行のコードで、音声 AI に記憶を。", "quick.sdk": "SDK 統合", "quick.runtime": "エージェント実行環境", "quick.agent": "音声エージェント", "intro.title": "イントロダクション", "intro.say": "二つの脳、一つの声。待ち時間はありません。", "intro.archTitle": "ストリーミング dual-brain アーキテクチャ", "intro.archBody": "左脳は schema とエンティティで事実記憶を整理し、右脳は独立ノードとエンティティ横断ノードで人格と感情をモデル化します。パイプライン全体はストリーミングで、ユーザーが話している間に分割・文字起こし・抽出・グラフへの書き込みまで進みます。検索時はルーティングしてから順位付けし、Top-K の記憶だけをコンテキストに入れます。", "intro.opdTitle": "OPD で構築したデータセットと音声モデル群", "intro.opdBody": "ChatMem-400K は、記憶世界の構築、SLM 検証付きオンライン on-policy 蒸留、人手による精修という 3 段階のパイプラインで生成され、同時に ChatMem-Bench 評価セットも作られます。OPD 蒸留後の Qwen2.5-Omni、Qwen3-Omni、Step-Audio2-Mini は、元の音声能力を損なうことなく、必要に応じて能動的に記憶を呼び出せるようになります。", "intro.dataset": "データセット", "intro.model": "モデル", "bench.title": "ベンチマーク", "bench.say": "より正確に。より少ないトークンで。音声ターン内でほぼ遅延なく完結。", "bench.locomoLabel": "長期的な事実記憶", "bench.locomoBody": "記憶は 5 件、302 トークン。ボード上で最高スコア。", "bench.personaLabel": "パーソナライズ記憶", "bench.personaBody": "覚えるのは、発言だけではなく、あなた自身です。", "bench.deploy": "デプロイ地点", "bench.tokens": "LoCoMo の平均記憶トークン", "bench.accuracy": "精度", "bench.higher": "高いほど良い ↑", "bench.lower": "低いほど良い ↓", "bench.memoryTokens": "記憶トークン", "bench.latency": "レイテンシ", "apps.title": "アプリケーション", "apps.say": "VoiceMem と一緒に作る。", "closing.title": "魂のある voice intelligence を構築しよう", "closing.button": "構築を始める", "closing.contact": "お問い合わせ"}, "ko": {"demo.title": "데모", "demo.say": "한 번 이야기하면, 다음에는 당신을 기억합니다.", "demo.watch": "YouTube에서 보기", "quick.title": "빠른 시작", "quick.say": "몇 줄의 코드로 음성 AI에 기억을 더하세요.", "quick.sdk": "SDK 통합", "quick.runtime": "에이전트 런타임", "quick.agent": "음성 에이전트", "intro.title": "소개", "intro.say": "두 개의 뇌, 하나의 목소리. 기다릴 필요가 없습니다.", "intro.archTitle": "스트리밍 dual-brain 아키텍처", "intro.archBody": "왼쪽 뇌는 schema와 엔터티로 사실 기억을 구조화하고, 오른쪽 뇌는 독립 노드와 엔터티 간 노드로 성격과 감정을 모델링합니다. 전체 파이프라인은 스트리밍 방식으로 동작해 사용자가 말하는 동안 분할, 전사, 추출, 그래프 기록까지 진행합니다. 질의 시에는 먼저 라우팅하고 그다음 순위를 매겨 Top-K 기억만 컨텍스트에 주입합니다.", "intro.opdTitle": "OPD로 구축한 데이터셋과 음성 모델군", "intro.opdBody": "ChatMem-400K는 기억 세계 구성, SLM 검증 온라인 on-policy 증류, 인간 정제의 3단계 파이프라인으로 만들어지며, 같은 과정에서 ChatMem-Bench 평가 세트도 생성됩니다. OPD 증류를 거친 Qwen2.5-Omni, Qwen3-Omni, Step-Audio2-Mini는 기존 음성 능력을 유지하면서 필요할 때 능동적으로 기억을 호출하는 법을 학습합니다.", "intro.dataset": "데이터셋", "intro.model": "모델", "bench.title": "벤치마킹", "bench.say": "더 정확하게, 더 적은 토큰으로, voice turn 안에서 거의 지연 없이.", "bench.locomoLabel": "장기 사실 기억", "bench.locomoBody": "기억 5개, 302토큰. 전체 보드 최고 점수.", "bench.personaLabel": "개인화 기억", "bench.personaBody": "무엇을 말했는지만이 아니라, 당신이 누구인지 기억합니다.", "bench.deploy": "배포 지점", "bench.tokens": "LoCoMo 평균 기억 토큰", "bench.accuracy": "정확도", "bench.higher": "높을수록 좋음 ↑", "bench.lower": "낮을수록 좋음 ↓", "bench.memoryTokens": "기억 토큰", "bench.latency": "지연 시간", "apps.title": "활용 사례", "apps.say": "VoiceMem과 함께 만들다.", "closing.title": "영혼이 있는 voice intelligence를 구축하세요", "closing.button": "빌드 시작", "closing.contact": "문의하기"}};
+  const I18N = {"en": {"demo.title": "Demo", "demo.say": "Talk to it once. It knows you next time.", "demo.watch": "Watch on YouTube", "quick.title": "Quick Start", "quick.say": "Memory for your voice AI, in a few lines.", "quick.sdk": "Offline Engine", "quick.runtime": "Streaming", "quick.agent": "Web Demo", "intro.title": "Introduction", "intro.say": "Two brains. One voice. Nothing to wait for.", "intro.archTitle": "Streaming dual-brain architecture", "intro.archBody": "The left brain organizes factual memory through schemas and entities, while the right brain models personality and emotion with independent and cross-entity nodes. The entire pipeline is streaming: while the user is still speaking, audio is segmented, transcribed, extracted, and written into the graph. At query time, VoiceMem routes first, ranks second, and injects only the Top-K memories into context.", "intro.opdTitle": "Datasets and voice-model family built with OPD", "intro.opdBody": "ChatMem-400K is produced by a three-stage pipeline of memory-world construction, SLM-validated online on-policy distillation, and human refinement; the same pipeline also produces the ChatMem-Bench evaluation set. After OPD distillation, Qwen2.5-Omni, Qwen3-Omni, and Step-Audio2-Mini learn to proactively invoke memory without sacrificing their original speech capabilities.", "intro.dataset": "Dataset", "intro.model": "Model", "bench.title": "Benchmarking", "bench.say": "More accurate. Fewer tokens. Near-zero latency inside the voice turn.", "bench.locomoLabel": "Long-horizon factual memory", "bench.locomoBody": "Five memories. 430 tokens. Best score on the board.", "bench.personaLabel": "Personalized memory", "bench.personaBody": "It remembers who you are, not just what you said.", "bench.deploy": "deployment point", "bench.tokens": "mean memory tokens on LoCoMo", "bench.accuracy": "Accuracy", "bench.higher": "HIGHER ↑", "bench.lower": "LOWER ↓", "bench.memoryTokens": "Memory tokens", "bench.latency": "Latency", "apps.title": "Applications", "apps.say": "Build it with VoiceMem.", "closing.title": "Start building voice intelligence with soul", "closing.button": "Start Building", "closing.contact": "Contact us"}, "zh-CN": {"demo.title": "演示", "demo.say": "只需聊一次，下次它就记得你。", "demo.watch": "在 YouTube 观看", "quick.title": "快速开始", "quick.say": "只需几行代码，为你的语音 AI 加上记忆。", "quick.sdk": "离线引擎", "quick.runtime": "流式接入", "quick.agent": "Web Demo", "intro.title": "介绍", "intro.say": "双脑协同，一个声音，无需等待。", "intro.archTitle": "流式 dual-brain 架构", "intro.archBody": "左脑以 schema 和实体组织事实记忆，右脑以独立与跨实体节点建模人格与情绪。整条链路全流式——用户还在说话时就已完成切分、转写、抽取并入图，查询时先路由后排序，只取 Top-K 拼进上下文。", "intro.opdTitle": "基于 OPD 构建的数据集与语音模型系列", "intro.opdBody": "ChatMem-400K 由记忆世界构建、SLM 验证的在线同策略蒸馏与人工精修三段流水线产出，并同时生成 ChatMem-Bench 评测集。Qwen2.5-Omni、Qwen3-Omni 与 Step-Audio2-Mini 经 OPD 蒸馏后学会主动调用记忆，且不损失原有语音能力。", "intro.dataset": "数据集", "intro.model": "模型", "bench.title": "基准测试", "bench.say": "更准确，更少 token，并且几乎无延迟地在 voice turn 内完成。", "bench.locomoLabel": "长时程事实记忆", "bench.locomoBody": "仅五条记忆、430 tokens，取得全榜最佳成绩。", "bench.personaLabel": "个性化记忆", "bench.personaBody": "它记住的是你是谁，而不只是你说过什么。", "bench.deploy": "部署点", "bench.tokens": "LoCoMo 平均记忆 tokens", "bench.accuracy": "准确率", "bench.higher": "越高越好 ↑", "bench.lower": "越低越好 ↓", "bench.memoryTokens": "记忆 tokens", "bench.latency": "延迟", "apps.title": "应用", "apps.say": "和 VoiceMem 一起构建。", "closing.title": "开始构建有灵魂的 voice intelligence", "closing.button": "开始构建", "closing.contact": "联系我们"}, "zh-TW": {"demo.title": "示範", "demo.say": "只要聊一次，下次它就記得你。", "demo.watch": "在 YouTube 觀看", "quick.title": "快速開始", "quick.say": "只需幾行程式碼，為你的語音 AI 加上記憶。", "quick.sdk": "離線引擎", "quick.runtime": "串流接入", "quick.agent": "Web Demo", "intro.title": "介紹", "intro.say": "雙腦協同，一個聲音，無需等待。", "intro.archTitle": "串流 dual-brain 架構", "intro.archBody": "左腦以 schema 與實體組織事實記憶，右腦以獨立與跨實體節點建模人格與情緒。整條鏈路皆為串流——使用者仍在說話時，就已完成切分、轉寫、抽取並寫入圖譜；查詢時先路由、再排序，只將 Top-K 記憶放入上下文。", "intro.opdTitle": "以 OPD 建構的資料集與語音模型系列", "intro.opdBody": "ChatMem-400K 由記憶世界建構、SLM 驗證的線上同策略蒸餾與人工精修三階段流程產出，並同步生成 ChatMem-Bench 評測集。Qwen2.5-Omni、Qwen3-Omni 與 Step-Audio2-Mini 經 OPD 蒸餾後學會主動調用記憶，且不犧牲原有語音能力。", "intro.dataset": "資料集", "intro.model": "模型", "bench.title": "基準測試", "bench.say": "更準確、更少 token，並且幾乎零延遲地在 voice turn 內完成。", "bench.locomoLabel": "長期事實記憶", "bench.locomoBody": "只需五條記憶、430 tokens，拿下全榜最佳成績。", "bench.personaLabel": "個人化記憶", "bench.personaBody": "它記得你是誰，而不只是你說過什麼。", "bench.deploy": "部署點", "bench.tokens": "LoCoMo 平均記憶 tokens", "bench.accuracy": "準確率", "bench.higher": "越高越好 ↑", "bench.lower": "越低越好 ↓", "bench.memoryTokens": "記憶 tokens", "bench.latency": "延遲", "apps.title": "應用", "apps.say": "和 VoiceMem 一起打造。", "closing.title": "開始構建有靈魂的 voice intelligence", "closing.button": "開始建置", "closing.contact": "聯絡我們"}, "ja": {"demo.title": "デモ", "demo.say": "一度話すだけ。次からは、あなたを覚えています。", "demo.watch": "YouTube で見る", "quick.title": "クイックスタート", "quick.say": "数行のコードで、音声 AI に記憶を。", "quick.sdk": "オフラインエンジン", "quick.runtime": "ストリーミング", "quick.agent": "Web デモ", "intro.title": "イントロダクション", "intro.say": "二つの脳、一つの声。待ち時間はありません。", "intro.archTitle": "ストリーミング dual-brain アーキテクチャ", "intro.archBody": "左脳は schema とエンティティで事実記憶を整理し、右脳は独立ノードとエンティティ横断ノードで人格と感情をモデル化します。パイプライン全体はストリーミングで、ユーザーが話している間に分割・文字起こし・抽出・グラフへの書き込みまで進みます。検索時はルーティングしてから順位付けし、Top-K の記憶だけをコンテキストに入れます。", "intro.opdTitle": "OPD で構築したデータセットと音声モデル群", "intro.opdBody": "ChatMem-400K は、記憶世界の構築、SLM 検証付きオンライン on-policy 蒸留、人手による精修という 3 段階のパイプラインで生成され、同時に ChatMem-Bench 評価セットも作られます。OPD 蒸留後の Qwen2.5-Omni、Qwen3-Omni、Step-Audio2-Mini は、元の音声能力を損なうことなく、必要に応じて能動的に記憶を呼び出せるようになります。", "intro.dataset": "データセット", "intro.model": "モデル", "bench.title": "ベンチマーク", "bench.say": "より正確に。より少ないトークンで。音声ターン内でほぼ遅延なく完結。", "bench.locomoLabel": "長期的な事実記憶", "bench.locomoBody": "記憶は 5 件、430 トークン。ボード上で最高スコア。", "bench.personaLabel": "パーソナライズ記憶", "bench.personaBody": "覚えるのは、発言だけではなく、あなた自身です。", "bench.deploy": "デプロイ地点", "bench.tokens": "LoCoMo の平均記憶トークン", "bench.accuracy": "精度", "bench.higher": "高いほど良い ↑", "bench.lower": "低いほど良い ↓", "bench.memoryTokens": "記憶トークン", "bench.latency": "レイテンシ", "apps.title": "アプリケーション", "apps.say": "VoiceMem と一緒に作る。", "closing.title": "魂のある voice intelligence を構築しよう", "closing.button": "構築を始める", "closing.contact": "お問い合わせ"}, "ko": {"demo.title": "데모", "demo.say": "한 번 이야기하면, 다음에는 당신을 기억합니다.", "demo.watch": "YouTube에서 보기", "quick.title": "빠른 시작", "quick.say": "몇 줄의 코드로 음성 AI에 기억을 더하세요.", "quick.sdk": "오프라인 엔진", "quick.runtime": "스트리밍", "quick.agent": "웹 데모", "intro.title": "소개", "intro.say": "두 개의 뇌, 하나의 목소리. 기다릴 필요가 없습니다.", "intro.archTitle": "스트리밍 dual-brain 아키텍처", "intro.archBody": "왼쪽 뇌는 schema와 엔터티로 사실 기억을 구조화하고, 오른쪽 뇌는 독립 노드와 엔터티 간 노드로 성격과 감정을 모델링합니다. 전체 파이프라인은 스트리밍 방식으로 동작해 사용자가 말하는 동안 분할, 전사, 추출, 그래프 기록까지 진행합니다. 질의 시에는 먼저 라우팅하고 그다음 순위를 매겨 Top-K 기억만 컨텍스트에 주입합니다.", "intro.opdTitle": "OPD로 구축한 데이터셋과 음성 모델군", "intro.opdBody": "ChatMem-400K는 기억 세계 구성, SLM 검증 온라인 on-policy 증류, 인간 정제의 3단계 파이프라인으로 만들어지며, 같은 과정에서 ChatMem-Bench 평가 세트도 생성됩니다. OPD 증류를 거친 Qwen2.5-Omni, Qwen3-Omni, Step-Audio2-Mini는 기존 음성 능력을 유지하면서 필요할 때 능동적으로 기억을 호출하는 법을 학습합니다.", "intro.dataset": "데이터셋", "intro.model": "모델", "bench.title": "벤치마킹", "bench.say": "더 정확하게, 더 적은 토큰으로, voice turn 안에서 거의 지연 없이.", "bench.locomoLabel": "장기 사실 기억", "bench.locomoBody": "기억 5개, 430토큰. 전체 보드 최고 점수.", "bench.personaLabel": "개인화 기억", "bench.personaBody": "무엇을 말했는지만이 아니라, 당신이 누구인지 기억합니다.", "bench.deploy": "배포 지점", "bench.tokens": "LoCoMo 평균 기억 토큰", "bench.accuracy": "정확도", "bench.higher": "높을수록 좋음 ↑", "bench.lower": "낮을수록 좋음 ↓", "bench.memoryTokens": "기억 토큰", "bench.latency": "지연 시간", "apps.title": "활용 사례", "apps.say": "VoiceMem과 함께 만들다.", "closing.title": "영혼이 있는 voice intelligence를 구축하세요", "closing.button": "빌드 시작", "closing.contact": "문의하기"}};
   const links = document.querySelectorAll('#nav-lang [data-lang]');
 
   function applyLanguage(lang){
@@ -3023,59 +3039,74 @@ else brain.addEventListener('load', plateLoaded);
 
   const CODE_COMMENTS = {
     en:[
-      '# 1. Install VoiceMem core',
-      '# 1. Install audio / environment / speaker features',
-      '# 2. Start the streaming voice service (adjust entrypoint to your repo)',
-      '# Per utterance → end, ASR, entities, schema, emotion, speaker, embedding',
-      '# Browser/client connects to the service WebSocket endpoint.',
-      '# 1. Use the maintained browser voice demo',
-      '# 2. Start the app (adjust filename to your actual demo entrypoint)',
-      '# 3. Open the local UI',
-      '# Talk directly with the agent while VoiceMem handles memory.'
+      '# 1. Install VoiceMem (ASR / voiceprint / scene / emotion / embedding built in)',
+      '# local models are lazy-loaded',
+      '# 2. Ingest audio — ASR, voiceprint, scene, emotion and embedding run inside',
+      '# "I\'m vegetarian, allergic to nuts."',
+      '# 3. Search — pure vector retrieval, decoupled from ingestion',
+      '# 1. The streaming interface behaves like a VAD that keeps eating audio',
+      '# 2. Memory was already retrieved while the user was still speaking',
+      '# 3. Every turn goes through one ingestion decision',
+      '# 1. Clone the repo — the demo lives here, pip ships the library only',
+      '# 2. Pull the default models',
+      '# 3. Start the interactive web demo',
+      '# 4. Then open the local UI'
     ],
     'zh-CN':[
-      '# 1. 安装 VoiceMem 核心',
-      '# 1. 安装音频 / 环境 / 说话人相关功能',
-      '# 2. 启动流式语音服务（按你的仓库调整入口文件）',
-      '# 每段语音 → 结束检测、ASR、实体、schema、情绪、说话人、embedding',
-      '# 浏览器 / 客户端连接到服务的 WebSocket 端点。',
-      '# 1. 使用维护中的浏览器语音 Demo',
-      '# 2. 启动应用（按实际 Demo 入口文件调整文件名）',
-      '# 3. 打开本地 UI',
-      '# 直接与 agent 对话，由 VoiceMem 负责记忆。'
+      '# 1. 安装 VoiceMem（内置 ASR / 声纹 / 场景 / 情绪 / 本地 embedding）',
+      '# 本地模型是懒加载的，先热一下',
+      '# 2. 入库音频 — 内部跑 ASR / 声纹 / 场景 / 情绪 / Embedding',
+      '# “我是素食主义者，对坚果过敏。”',
+      '# 3. 检索 — 纯向量检索，跟写入无关',
+      '# 1. 流式接口可以看作一个持续处理音频的 VAD',
+      '# 2. 人还没说完，后台就已经把记忆查好了',
+      '# 3. 每一轮都要走一次入库判断',
+      '# 1. 克隆仓库 — 演示代码在仓库里，pip 装的只有库本身',
+      '# 2. 下载所需模型',
+      '# 3. 启动交互式 Web Demo',
+      '# 4. 然后访问本地页面'
     ],
     'zh-TW':[
-      '# 1. 安裝 VoiceMem 核心',
-      '# 1. 安裝音訊 / 環境 / 說話者相關功能',
-      '# 2. 啟動串流語音服務（依你的倉庫調整入口檔案）',
-      '# 每段語音 → 結束偵測、ASR、實體、schema、情緒、說話者、embedding',
-      '# 瀏覽器 / 用戶端連線到服務的 WebSocket 端點。',
-      '# 1. 使用持續維護的瀏覽器語音 Demo',
-      '# 2. 啟動應用（依實際 Demo 入口檔案調整檔名）',
-      '# 3. 開啟本機 UI',
-      '# 直接與 agent 對話，由 VoiceMem 處理記憶。'
+      '# 1. 安裝 VoiceMem（內建 ASR / 聲紋 / 場景 / 情緒 / 本地 embedding）',
+      '# 本地模型是懶載入的，先熱一下',
+      '# 2. 寫入音訊 — 內部跑 ASR / 聲紋 / 場景 / 情緒 / Embedding',
+      '# 「我是素食主義者，對堅果過敏。」',
+      '# 3. 檢索 — 純向量檢索，與寫入無關',
+      '# 1. 串流介面可以看作一個持續處理音訊的 VAD',
+      '# 2. 人還沒說完，背後已經把記憶查好了',
+      '# 3. 每一輪都要走一次寫入判斷',
+      '# 1. 複製倉庫 — 範例在倉庫裡，pip 裝的只有函式庫本身',
+      '# 2. 下載所需模型',
+      '# 3. 啟動互動式 Web Demo',
+      '# 4. 然後開啟本機頁面'
     ],
     ja:[
-      '# 1. VoiceMem コアをインストール',
-      '# 1. 音声 / 環境 / 話者機能をインストール',
-      '# 2. ストリーミング音声サービスを起動（リポジトリに合わせてエントリポイントを調整）',
-      '# 発話ごと → 終端検出、ASR、エンティティ、schema、感情、話者、embedding',
-      '# ブラウザ / クライアントはサービスの WebSocket エンドポイントに接続します。',
-      '# 1. メンテナンス済みのブラウザ音声デモを使用',
-      '# 2. アプリを起動（実際のデモ入口に合わせてファイル名を調整）',
-      '# 3. ローカル UI を開く',
-      '# VoiceMem が記憶を処理する間、agent と直接会話します。'
+      '# 1. VoiceMem をインストール（ASR / 話者 / シーン / 感情 / embedding 内蔵）',
+      '# ローカルモデルは遅延読み込みです',
+      '# 2. 音声を取り込む — ASR / 話者 / シーン / 感情 / Embedding を内部で実行',
+      '# 「私はベジタリアンで、ナッツアレルギーです」',
+      '# 3. 検索 — 純粋なベクトル検索で、書き込みとは独立',
+      '# 1. ストリーミング API は音声を食べ続ける VAD のようなもの',
+      '# 2. ユーザーが話している間に記憶の検索は完了済み',
+      '# 3. ターンごとに保存すべきかを判定',
+      '# 1. リポジトリをクローン — デモはリポジトリ内、pip はライブラリのみ',
+      '# 2. デフォルトモデルをダウンロード',
+      '# 3. インタラクティブな Web デモを起動',
+      '# 4. ローカル UI を開く'
     ],
     ko:[
-      '# 1. VoiceMem 코어 설치',
-      '# 1. 오디오 / 환경 / 화자 기능 설치',
-      '# 2. 스트리밍 음성 서비스 시작(저장소에 맞게 엔트리포인트 조정)',
-      '# 발화별 → 종료 감지, ASR, 엔터티, schema, 감정, 화자, embedding',
-      '# 브라우저 / 클라이언트가 서비스 WebSocket 엔드포인트에 연결됩니다.',
-      '# 1. 유지 관리되는 브라우저 음성 데모 사용',
-      '# 2. 앱 시작(실제 데모 엔트리포인트에 맞게 파일명 조정)',
-      '# 3. 로컬 UI 열기',
-      '# VoiceMem이 메모리를 처리하는 동안 agent와 직접 대화합니다.'
+      '# 1. VoiceMem 설치(ASR / 화자 / 장면 / 감정 / 로컬 embedding 내장)',
+      '# 로컬 모델은 지연 로딩됩니다',
+      '# 2. 오디오 적재 — ASR / 화자 / 장면 / 감정 / Embedding이 내부에서 실행',
+      '# "저는 채식주의자고 견과류 알레르기가 있어요."',
+      '# 3. 검색 — 순수 벡터 검색으로 적재와 무관',
+      '# 1. 스트리밍 인터페이스는 오디오를 계속 처리하는 VAD와 같습니다',
+      '# 2. 사용자가 말하는 동안 이미 기억을 검색해 두었습니다',
+      '# 3. 매 턴마다 저장 여부를 판단합니다',
+      '# 1. 저장소 클론 — 데모는 저장소에, pip은 라이브러리만 설치',
+      '# 2. 기본 모델 다운로드',
+      '# 3. 대화형 웹 데모 시작',
+      '# 4. 로컬 UI 열기'
     ]
   };
 
