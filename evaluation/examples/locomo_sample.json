@@ -1,0 +1,44 @@
+[
+  {
+    "sample_id": "sample-1",
+    "conversation": {
+      "speaker_a": "Jiaqi",
+      "speaker_b": "Assistant",
+      "session_1_date_time": "2023-05-08 10:00",
+      "session_1": [
+        {"speaker": "Jiaqi", "text": "我下周要搬去杭州了，工作调动。", "dia_id": "D1:1"},
+        {"speaker": "Assistant", "text": "挺大的变动，房子找好了吗？", "dia_id": "D1:2"},
+        {"speaker": "Jiaqi", "text": "找好了，在西湖区，离公司骑车十五分钟。", "dia_id": "D1:3"},
+        {"speaker": "Jiaqi", "text": "我养了一只英短叫墨墨，也一起带过去。", "dia_id": "D1:4"}
+      ],
+      "session_2_date_time": "2023-06-20 21:30",
+      "session_2": [
+        {"speaker": "Jiaqi", "text": "搬完一个多月了，墨墨适应得比我快。", "dia_id": "D2:1"},
+        {"speaker": "Assistant", "text": "你自己怎么样？", "dia_id": "D2:2"},
+        {"speaker": "Jiaqi", "text": "还行，就是新组的节奏快，上周连着加了三天班。", "dia_id": "D2:3"}
+      ]
+    },
+    "qa": [
+      {"question": "Jiaqi 的猫叫什么名字？", "answer": "墨墨", "category": 4},
+      {"question": "Jiaqi 搬到哪个城市了？", "answer": "杭州", "category": 4},
+      {"question": "Jiaqi 是先搬家还是先提到加班？", "answer": "先搬家", "category": 2}
+    ]
+  },
+  {
+    "sample_id": "sample-2",
+    "conversation": {
+      "speaker_a": "Jiaqi",
+      "speaker_b": "Assistant",
+      "session_1_date_time": "2023-07-02 12:15",
+      "session_1": [
+        {"speaker": "Jiaqi", "text": "我是素食主义者，而且对坚果过敏。", "dia_id": "D1:1"},
+        {"speaker": "Assistant", "text": "记住了，那推荐吃的会避开这两样。", "dia_id": "D1:2"},
+        {"speaker": "Jiaqi", "text": "对了，我最不能接受香菜。", "dia_id": "D1:3"}
+      ]
+    },
+    "qa": [
+      {"question": "Jiaqi 对什么过敏？", "answer": "坚果", "category": 4},
+      {"question": "Jiaqi 讨厌哪种蔬菜？", "answer": "香菜", "category": 4}
+    ]
+  }
+]

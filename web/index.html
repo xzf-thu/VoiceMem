@@ -1,0 +1,2186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>VoiceMem — memory graph</title>
+<style>
+  :root{
+    --ink:#f2f4f8;
+    --dim:#7d8496;
+    --line:rgba(255,255,255,.14);
+    --blue:#4aa8f0;
+    --rose:#ff3d8b;
+    --violet:#a583ff;
+    --mint:#58e08d;
+    --pink:#ff5fa2;
+    --amber:#ff9a3c;
+    --leaf:#4ade80;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:#000;color:var(--ink);
+    font-family:var(--mono);
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  #shell{position:fixed;inset:0;display:flex;flex-direction:column;padding:18px clamp(14px,3vw,40px) 14px}
+
+  /* ---------- masthead ---------- */
+  header{display:flex;align-items:center;gap:18px;flex:0 0 auto}
+  header .rule{flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--line) 22%,var(--line) 78%,transparent)}
+  header h1{
+    margin:0;font-weight:400;font-size:clamp(19px,2.3vw,29px);
+    letter-spacing:.42em;text-indent:.42em;white-space:nowrap;
+    color:#fff;text-shadow:0 0 26px rgba(180,205,255,.35);
+  }
+
+  /* ---------- stage ---------- */
+  main{flex:1 1 auto;position:relative;display:flex;align-items:center;justify-content:center;min-height:0}
+  #stage{position:relative;width:100%;height:100%}
+  #brain{
+    position:absolute;inset:0;width:100%;height:100%;
+    object-fit:contain;mix-blend-mode:screen;
+    /* contrast 拉高让外圈那层软光衰减更快（光晕变窄），brightness 压低让它不抢戏 */
+    filter:brightness(.72) contrast(1.5);
+    opacity:0;transition:opacity 1.4s ease .1s;
+    pointer-events:none;user-select:none;
+  }
+  #brain.in{opacity:1}
+  #fx{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+
+  /* ---------- hemisphere legends ---------- */
+  .side{
+    position:absolute;top:50%;transform:translateY(-50%);
+    display:flex;flex-direction:column;gap:30px;z-index:3;
+    pointer-events:auto;
+  }
+  .side.l{left:clamp(6px,2vw,34px);align-items:flex-start}
+  .side.r{right:clamp(6px,2vw,34px);align-items:flex-end}
+  .side h2{
+    margin:0 0 4px;font-family:var(--serif);font-style:italic;font-weight:400;
+    font-size:clamp(13px,1.35vw,18px);letter-spacing:.01em;color:#e8ecf5;white-space:nowrap;
+  }
+  .side.l h2 em{font-style:italic;color:#7fb2e8}
+  .side.r h2 em{font-style:italic;color:#e879a8}
+  .key{
+    display:flex;align-items:center;gap:9px;cursor:default;
+    font-family:var(--serif);font-style:italic;font-size:13px;color:var(--dim);
+    transition:color .35s ease,opacity .35s ease;padding:3px 0;
+  }
+  .side.r .key{flex-direction:row-reverse}
+  .key:hover{color:#fff}
+  .key .g{width:11px;height:11px;flex:0 0 11px;opacity:.85;transition:transform .35s cubic-bezier(.2,.8,.2,1)}
+  .key:hover .g{transform:scale(1.35)}
+  .key .g svg{display:block;overflow:visible}
+
+  /* ---------- memory card ---------- */
+  #card{
+    position:absolute;left:0;top:0;width:214px;z-index:5;
+    border:1px solid rgba(255,255,255,.82);
+    background:rgba(4,5,8,.80);
+    backdrop-filter:blur(9px) saturate(120%);
+    -webkit-backdrop-filter:blur(9px) saturate(120%);
+    padding:11px 12px 10px;
+    opacity:0;transform:translate3d(-999px,-999px,0) scale(.97);
+    transition:opacity .22s ease,transform .22s cubic-bezier(.2,.8,.2,1);
+    will-change:transform,opacity;pointer-events:none;
+    box-shadow:0 0 0 1px rgba(0,0,0,.9),0 18px 50px -18px rgba(0,0,0,1);
+  }
+  #card.on{opacity:1}
+  #card .eb{display:flex;align-items:center;gap:7px;margin-bottom:9px}
+  #card .sw{width:7px;height:7px;border:1.4px solid #fff;flex:0 0 7px}
+  #card .kd{font-size:9.5px;letter-spacing:.24em;color:#fff;text-transform:uppercase}
+  #card .id{margin-left:auto;font-size:9.5px;letter-spacing:.1em;color:#6c7382}
+  #card .cbody{font-family:var(--serif);font-size:12px;line-height:1.45;color:#dfe4ee;
+    margin-bottom:10px;max-height:96px;overflow:auto;word-break:break-word}
+  #card .bars{display:flex;flex-direction:column;gap:6px;margin-bottom:11px}
+  #card .bars i{
+    display:block;height:6px;border-radius:1px;
+    background:linear-gradient(90deg,rgba(255,255,255,.07),rgba(255,255,255,.16),rgba(255,255,255,.07));
+    background-size:220% 100%;animation:sweep 2.6s linear infinite;
+  }
+  #card .bars i:nth-child(2){animation-delay:.18s}
+  #card .bars i:nth-child(3){animation-delay:.36s}
+  @keyframes sweep{from{background-position:120% 0}to{background-position:-120% 0}}
+  #card .ft{
+    display:flex;justify-content:space-between;font-size:9px;letter-spacing:.14em;
+    color:#5d6472;border-top:1px solid rgba(255,255,255,.14);padding-top:7px;
+  }
+
+  /* ---------- footer ---------- */
+  footer{flex:0 0 auto;margin-top:10px}
+  .ticks{
+    height:9px;
+    background:repeating-linear-gradient(90deg,var(--line) 0 1px,transparent 1px 11px);
+    -webkit-mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);
+    mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);
+    opacity:.75;
+  }
+  .facts{display:flex;justify-content:space-around;gap:10px;padding-top:9px;flex-wrap:wrap}
+  .facts span{font-size:11px;color:#9aa1b0;letter-spacing:.05em;white-space:nowrap}
+  .facts b{font-weight:400;color:#e6eaf2}
+  .facts em{font-family:var(--serif);font-style:italic;color:#9aa1b0}
+
+  .hint{
+    position:absolute;left:50%;bottom:6px;transform:translateX(-50%);
+    font-size:10px;letter-spacing:.2em;color:#4d545f;z-index:4;
+    animation:fade 6s ease 3.4s forwards;pointer-events:none;
+  }
+  @keyframes fade{to{opacity:0}}
+
+  @media (max-width:900px){
+    .side{display:none}
+    header h1{letter-spacing:.3em;text-indent:.3em}
+    #card{width:186px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    #card .bars i{animation:none}
+    .hint{animation:none}
+  }
+
+  /* ===================== 布局：左板块 1 : 右板块 2 =====================
+     左板块内部再分 sidebar : 实时区 = 2 : 5。
+     sidebar 收起时变成一条 46px 的窄条，只留展开按钮。 */
+  #app{
+    position:fixed;inset:0;display:grid;
+    grid-template-columns:1fr 2fr;
+    grid-template-rows:minmax(0,1fr);
+  }
+  .leftpane{
+    display:grid;
+    grid-template-columns:2fr 5fr;
+    min-width:0;min-height:0;
+    border-right:1px solid var(--line);
+    transition:grid-template-columns .32s cubic-bezier(.2,.8,.2,1);
+  }
+  #app.rail-collapsed .leftpane{grid-template-columns:46px 1fr}
+
+  /* ① leftmost collapsible memory rail */
+  .rail{position:relative;min-height:0;display:flex;flex-direction:column;
+    border-right:1px solid var(--line);background:rgba(6,8,12,.55)}
+  .rail-top{flex:0 0 auto;display:flex;align-items:center;gap:9px;
+    padding:16px 12px 12px;border-bottom:1px solid var(--line)}
+  .rail-top h1{margin:0;font-weight:400;font-size:15px;letter-spacing:.32em;
+    color:#fff;white-space:nowrap;text-shadow:0 0 22px rgba(180,205,255,.35);transition:opacity .2s}
+  .rail-toggle{margin-left:auto;width:24px;height:24px;flex:0 0 24px;border:1px solid var(--line);
+    background:transparent;color:#9aa1b0;border-radius:6px;cursor:pointer;font-size:15px;
+    line-height:1;display:flex;align-items:center;justify-content:center}
+  .rail-toggle:hover{color:#fff;border-color:rgba(255,255,255,.4)}
+  .rail-body{flex:1;overflow:auto;padding:14px 14px 24px;transition:opacity .2s}
+  #app.rail-collapsed .rail-body,#app.rail-collapsed .rail-top h1{opacity:0;pointer-events:none}
+  /* 流线动效：常驻，没声音时静态呼吸，有输入时大幅波动 */
+  /* 占中间列 40% 高；aspect-ratio 保证它始终是正圆（画布 backing 是 264×264，
+     CSS 只管显示尺寸）。min-height 0 让它在窄屏上能被压下去而不是撑破布局。 */
+  #orb{display:block;flex:0 1 40%;height:40%;min-height:0;width:auto;aspect-ratio:1/1;
+    margin:0 auto 4px;opacity:.6;transition:opacity .5s ease;pointer-events:none;
+    border-radius:50%}
+  #orb.on{opacity:1}
+  .play{margin:0 6px;padding:0 5px;background:none;border:1px solid rgba(255,255,255,.28);
+    border-radius:3px;color:#8fc6ff;font-size:10px;line-height:1.5;cursor:pointer}
+  .play:hover{color:#fff;border-color:rgba(255,255,255,.6)}
+  .rail-sec{margin:4px 0 16px}
+  .rail-sec>h2{margin:0 0 6px;font-family:var(--serif);font-style:italic;font-weight:400;font-size:13.5px}
+  .rail-sec.l>h2 em{color:#7fb2e8;font-style:italic}
+  .rail-sec.r>h2 em{color:#e879a8;font-style:italic}
+  .cat{display:flex;align-items:center;gap:8px;margin:11px 0 5px;cursor:default;
+    font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#c7cdd9}
+  .cat .dot{width:9px;height:9px;flex:0 0 9px;border-radius:2px;background:var(--c);box-shadow:0 0 8px var(--c)}
+  .cat .n{margin-left:auto;font-size:10px;letter-spacing:.05em;color:#5d6472}
+  ul.mem{list-style:none;margin:0 0 2px;padding:0}
+  ul.mem li{font-family:var(--serif);font-size:12.5px;line-height:1.4;color:#9aa1b0;
+    padding:4px 0 4px 15px;margin-left:3px;border-left:1px solid var(--line)}
+  ul.mem li:hover{color:#e6eaf2;border-left-color:rgba(255,255,255,.4)}
+  ul.mem li.you{color:#d0b3ff;border-left-color:var(--violet);font-style:italic}
+  ul.mem li.new{animation:memin .5s ease}
+  @keyframes memin{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:none}}
+
+  /* ② middle column: three stacked blocks */
+  .center{display:flex;flex-direction:column;gap:12px;min-width:0;min-height:0;padding:16px 14px}
+  .block{border:1px solid var(--line);border-radius:11px;background:rgba(6,8,12,.5);
+    padding:13px 15px;display:flex;flex-direction:column;min-height:0}
+  .block-h{flex:0 0 auto;display:flex;align-items:center;gap:9px;margin-bottom:10px;
+    font-size:10px;letter-spacing:.24em;text-transform:uppercase;color:#7d8496}
+  .block-h::after{content:"";flex:1;height:1px;background:var(--line)}
+  /* 召回框只要够看出"每轮取到的东西不一样"就行，不占满高度；
+     省下的给回复——那才是要让人读的地方。 */
+  .io-in{flex:0 0 auto}
+  .recall{flex:0 0 auto;max-height:190px}
+  /* 回复区保底：窗口矮时宁可把上面那个圆压小，也不能让回复只剩一条缝 */
+  .io-out{flex:1 1 auto;min-height:180px;display:flex;flex-direction:column}
+  .live-text{font-family:var(--serif);font-size:15px;line-height:1.5;color:#eef1f7;min-height:23px}
+  .textin{width:100%;box-sizing:border-box;margin-top:10px;font-size:13px;padding:8px 10px;
+    border:1px solid var(--line);border-radius:8px;background:#12151b;color:#e8ecf5;font-family:var(--serif)}
+  .textin:focus{outline:none;border-color:rgba(74,168,240,.5)}
+  .live-text .caret{display:inline-block;width:7px;height:15px;vertical-align:-2px;margin-left:2px;
+    background:var(--blue);animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  .tags{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px;min-height:24px}
+  .tag{font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);color:#c7cdd9;white-space:nowrap}
+  .tag b{font-weight:400;opacity:.55;margin-right:6px}
+  .tag.emo{border-color:rgba(255,95,162,.45);color:#ff9dc4}
+  .tag.ent{border-color:rgba(74,168,240,.45);color:#9fd0ff}
+  .tag.sch{border-color:rgba(88,224,141,.45);color:#8ce9b3}
+  .recall-cols{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .recall .rc ul{overflow:auto}          /* 条目多了自己滚，不把框撑开 */
+  .io-out .reply{flex:1;min-height:0;overflow:auto}
+  .rc{display:flex;flex-direction:column;min-height:0}
+  .rc-h{flex:0 0 auto;font-size:11px;letter-spacing:.1em;margin-bottom:7px}
+  .rc.l .rc-h{color:#7fb2e8}.rc.r .rc-h{color:#e879a8}
+  .rc ul{list-style:none;margin:0;padding:0;overflow:auto;flex:1;min-height:0}
+  .rc li{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;color:#aeb4c2;
+    padding:6px 0;border-bottom:1px dashed var(--line);line-height:1.35}
+  .rc li .sc{flex:0 0 auto;color:#5d6472;font-variant-numeric:tabular-nums;font-size:11px}
+  .reply{flex:1;min-height:42px;overflow:auto;font-family:var(--serif);font-size:15px;line-height:1.55;color:#eef1f7}
+  .io-foot{flex:0 0 auto;display:flex;align-items:center;gap:12px;margin-top:11px;padding-top:10px;border-top:1px solid var(--line)}
+  .talk{margin-left:auto;font-size:12.5px;padding:7px 16px;border-radius:999px;cursor:pointer;
+    border:1px solid rgba(74,168,240,.5);background:rgba(74,168,240,.12);color:#9fd0ff;letter-spacing:.05em}
+  .talk:hover{background:rgba(74,168,240,.22);color:#fff}
+  .talk.live{border-color:rgba(255,95,162,.55);background:rgba(255,95,162,.14);color:#ff9dc4}
+
+  /* voice indicator: waveform when AI speaks / ear when user speaks */
+  .voice{display:flex;align-items:center;gap:11px;height:30px}
+  .voice .lab{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:#6c7382}
+  .voice #wave{display:none;width:150px;height:30px}
+  .voice.ai #wave{display:block}
+  .voice.ai .lab{color:#8ce9b3}
+  .voice.user .lab{color:#9fd0ff}
+  .ear-wrap{position:relative;width:26px;height:26px;display:none}
+  .voice.user .ear-wrap{display:block}
+  .ear-wrap .ring{position:absolute;inset:0;border:1px solid rgba(159,208,255,.5);border-radius:50%;
+    animation:earpulse 1.6s ease-out infinite}
+  @keyframes earpulse{0%{transform:scale(.55);opacity:.85}100%{transform:scale(1.5);opacity:0}}
+
+  /* ③ brain column (center-right) */
+  /* 右板块：顶部一个切换，下面两个视图只显示一个 */
+  .rightpane{display:flex;flex-direction:column;min-width:0;min-height:0}
+  .switch{flex:0 0 auto;display:flex;gap:4px;padding:10px 14px;
+    border-bottom:1px solid var(--line)}
+  .switch button{padding:5px 14px;border:1px solid var(--line);border-radius:999px;
+    background:none;color:var(--dim);font-size:12px;letter-spacing:.06em;cursor:pointer}
+  .switch button.on{color:#fff;border-color:rgba(255,255,255,.5);
+    background:rgba(255,255,255,.06)}
+  .dl{margin-left:auto;display:flex;gap:6px;align-items:center}
+  .dl-name{width:150px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;
+    background:rgba(255,255,255,.03);color:#dfe4ee;font-size:11.5px;font-family:inherit}
+  .dl-name:focus{outline:none;border-color:rgba(255,255,255,.45)}
+  .dl-btn{padding:5px 12px;border:1px solid var(--line);border-radius:999px;
+    background:none;color:var(--dim);font-size:12px;cursor:pointer}
+  .dl-btn:hover{color:#fff;border-color:rgba(255,255,255,.5)}
+  .view{flex:1;min-height:0;position:relative;overflow:hidden}
+  .view.hide{display:none}
+  .brainwrap{position:relative;width:100%;height:100%;overflow:hidden}
+
+  /* Chat 视图：当前 session 的一来一回原文 */
+  /* 对话气泡：你的靠右、蓝色实心；VoiceMem 的靠左、白色描边 */
+  .chat{height:100%;overflow:auto;padding:22px 26px;
+    display:flex;flex-direction:column;gap:14px}
+  .chat .turn{max-width:74%;display:flex;flex-direction:column;gap:4px}
+  .chat .turn.user{align-self:flex-end;align-items:flex-end}
+  .chat .turn.ai{align-self:flex-start;align-items:flex-start}
+  .chat .who{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+    padding:0 4px}
+  .chat .turn.user .who{color:#f2f5fa}
+  .chat .turn.ai .who{color:var(--pink)}
+  .chat .said{font-size:14px;line-height:1.6;white-space:pre-wrap;
+    padding:10px 14px;border-radius:14px}
+  .chat .turn.user .said{background:#2f6fd0;color:#fff;
+    border:1px solid #2f6fd0;border-bottom-right-radius:4px}
+  .chat .turn.ai .said{background:transparent;color:#e8ecf3;
+    border:1px solid rgba(255,255,255,.5);border-bottom-left-radius:4px}
+  .chat .empty{align-self:center;color:var(--dim);font-size:13px;padding-top:40px}
+
+  /* sidebar：session 列表 */
+  .sess-new{display:block;width:100%;margin:0 0 12px;padding:7px 10px;
+    border:1px solid var(--line);border-radius:7px;background:none;
+    color:var(--dim);font-size:12px;cursor:pointer;text-align:left}
+  .sess-new:hover{color:#fff;border-color:rgba(255,255,255,.4)}
+  .sess{list-style:none;margin:0;padding:0}
+  .sess li{padding:8px 10px;margin-bottom:4px;border-radius:7px;cursor:pointer;
+    font-size:12.5px;line-height:1.45;color:var(--dim)}
+  .sess li:hover{background:rgba(255,255,255,.05)}
+  .sess li.on{background:rgba(255,255,255,.09);color:#eef2f8}
+  .sess .t{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sess .n{display:block;margin-top:2px;font-size:10.5px;opacity:.65}
+
+  @media (max-width:820px){
+    #app{grid-template-columns:1fr;grid-template-rows:auto auto 1fr;overflow:auto}
+  }
+
+  /* ═══════════════ 视觉增强层（纯 CSS，追加式）═══════════════
+     只用后置覆盖，不改上面任何选择器，也不碰画布绘制逻辑。
+     整段删掉即可回到原样。 */
+
+  :root{
+    --glass:linear-gradient(160deg,rgba(255,255,255,.055),rgba(255,255,255,.012) 42%,rgba(255,255,255,0));
+    --hair:rgba(255,255,255,.10);
+    --hair-lit:rgba(255,255,255,.22);
+    --lift:0 1px 0 rgba(255,255,255,.055) inset, 0 18px 44px -28px rgba(0,0,0,.95);
+  }
+
+  /* ---- 环境层：左蓝右粉的半球辉光 + 细网格。铺在所有面板之下 ---- */
+  body::before{
+    content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+    background:
+      radial-gradient(58% 74% at 8% 42%,  rgba(74,168,240,.13), transparent 68%),
+      radial-gradient(58% 74% at 92% 56%, rgba(255,61,139,.10), transparent 68%),
+      radial-gradient(120% 90% at 50% 120%, rgba(165,131,255,.07), transparent 70%),
+      repeating-linear-gradient(0deg,  rgba(255,255,255,.018) 0 1px, transparent 1px 46px),
+      repeating-linear-gradient(90deg, rgba(255,255,255,.018) 0 1px, transparent 1px 46px);
+  }
+  /* 极慢的一道扫掠。1% 的亮度，只在余光里察觉得到——再亮就成了装饰 */
+  body::after{
+    content:"";position:fixed;left:0;right:0;height:38vh;top:-38vh;z-index:0;pointer-events:none;
+    background:linear-gradient(180deg,transparent,rgba(150,190,255,.035),transparent);
+    animation:scanfall 14s linear infinite;
+  }
+  @keyframes scanfall{to{transform:translateY(160vh)}}
+  #app{position:fixed;z-index:1}
+
+  /* ---- 面板：玻璃 + 顶缘高光 ---- */
+  .block,.rail,#card{
+    background-image:var(--glass);
+    backdrop-filter:blur(14px) saturate(118%);
+    -webkit-backdrop-filter:blur(14px) saturate(118%);
+    box-shadow:var(--lift);
+  }
+  .block{
+    border-color:var(--hair);
+    background-color:rgba(8,10,15,.44);
+    transition:border-color .4s ease,box-shadow .4s ease;
+  }
+  .block:hover{border-color:var(--hair-lit)}
+  .rail{background-color:rgba(7,9,14,.52)}
+
+  /* 区块标题：前面一枚会呼吸的小方块 */
+  .block-h{gap:8px}
+  .block-h::before{
+    content:"";width:5px;height:5px;flex:0 0 5px;border-radius:1px;
+    background:var(--blue);box-shadow:0 0 9px rgba(74,168,240,.9);
+    animation:tick 3.4s ease-in-out infinite;
+  }
+  @keyframes tick{0%,100%{opacity:.35}50%{opacity:1}}
+  .block-h::after{background:linear-gradient(90deg,var(--hair),transparent)}
+
+  /* ---- 脑图：半球染色 + 四角括号 + 中线 ---- */
+  .brainwrap::before{
+    content:"";position:absolute;inset:0;z-index:0;pointer-events:none;
+    background:
+      radial-gradient(46% 62% at 24% 50%, rgba(74,168,240,.10), transparent 70%),
+      radial-gradient(46% 62% at 76% 50%, rgba(255,61,139,.09), transparent 70%),
+      linear-gradient(90deg,transparent 49.85%,rgba(255,255,255,.05) 50%,transparent 50.15%);
+  }
+  /* 四角括号：科幻取景框，纯边框画的 */
+  .brainwrap::after{
+    content:"";position:absolute;inset:16px;z-index:4;pointer-events:none;
+    border:1px solid transparent;
+    background:
+      linear-gradient(var(--hair-lit),var(--hair-lit)) left top/22px 1px no-repeat,
+      linear-gradient(var(--hair-lit),var(--hair-lit)) left top/1px 22px no-repeat,
+      linear-gradient(var(--hair-lit),var(--hair-lit)) right top/22px 1px no-repeat,
+      linear-gradient(var(--hair-lit),var(--hair-lit)) right top/1px 22px no-repeat,
+      linear-gradient(var(--hair-lit),var(--hair-lit)) left bottom/22px 1px no-repeat,
+      linear-gradient(var(--hair-lit),var(--hair-lit)) left bottom/1px 22px no-repeat,
+      linear-gradient(var(--hair-lit),var(--hair-lit)) right bottom/22px 1px no-repeat,
+      linear-gradient(var(--hair-lit),var(--hair-lit)) right bottom/1px 22px no-repeat;
+  }
+
+  /* ---- 控件 ---- */
+  .switch button{transition:color .25s,border-color .25s,background .25s,box-shadow .25s}
+  .switch button.on{
+    background:linear-gradient(180deg,rgba(255,255,255,.12),rgba(255,255,255,.04));
+    box-shadow:0 0 18px -6px rgba(160,200,255,.6), 0 1px 0 rgba(255,255,255,.14) inset;
+  }
+  .talk{
+    background:linear-gradient(180deg,rgba(74,168,240,.24),rgba(74,168,240,.08));
+    box-shadow:0 0 22px -8px rgba(74,168,240,.9), 0 1px 0 rgba(255,255,255,.14) inset;
+    transition:background .25s,box-shadow .25s,color .25s;
+  }
+  .talk:hover{box-shadow:0 0 28px -6px rgba(74,168,240,1), 0 1px 0 rgba(255,255,255,.2) inset}
+  .talk.live{
+    background:linear-gradient(180deg,rgba(255,61,139,.26),rgba(255,61,139,.09));
+    box-shadow:0 0 24px -7px rgba(255,61,139,.95), 0 1px 0 rgba(255,255,255,.14) inset;
+  }
+
+  /* ---- 标签：描边之外补一圈同色辉光 ---- */
+  .tag{background:rgba(255,255,255,.028);transition:box-shadow .3s,color .3s}
+  .tag.emo{box-shadow:0 0 16px -8px rgba(255,95,162,.95)}
+  .tag.ent{box-shadow:0 0 16px -8px rgba(74,168,240,.95)}
+  .tag.sch{box-shadow:0 0 16px -8px rgba(88,224,141,.95)}
+
+  /* ---- 召回条目：命中感 ---- */
+  .rc li{transition:color .25s,border-color .25s}
+  .rc li:hover{color:#e9edf5;border-bottom-color:var(--hair-lit)}
+  .rc li .sc{font-variant-numeric:tabular-nums}
+  .rc.l .rc-h,.rc.r .rc-h{letter-spacing:.16em;text-transform:uppercase;font-size:10px}
+
+  /* ---- 对话气泡 ---- */
+  .chat .turn.user .said{
+    background:linear-gradient(160deg,#3b7ee0,#2657ab);border-color:rgba(255,255,255,.18);
+    box-shadow:0 10px 26px -14px rgba(47,111,208,.95);
+  }
+  .chat .turn.ai .said{
+    background:linear-gradient(160deg,rgba(255,255,255,.06),rgba(255,255,255,.015));
+    border-color:rgba(255,255,255,.28);backdrop-filter:blur(8px);
+  }
+
+  /* ---- 输入框 ---- */
+  .textin{background:rgba(255,255,255,.035);transition:border-color .25s,box-shadow .25s}
+  .textin:focus{box-shadow:0 0 20px -8px rgba(74,168,240,.9)}
+
+  @media (prefers-reduced-motion:reduce){
+    body::after{animation:none;display:none}
+    .block-h::before{animation:none;opacity:.8}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+ <section class="leftpane">
+
+  <!-- ① 最左：可收起/展开的记忆栏板（左脑 + 右脑，按类别分好）-->
+  <aside class="rail">
+    <div class="rail-top">
+      <h1>VoiceMem</h1>
+      <button class="rail-toggle" id="railToggle" title="收起 / 展开">‹</button>
+    </div>
+    <div class="rail-body">
+      <button class="sess-new" id="newSess">+ 新对话</button>
+      <ul class="sess" id="sessList"></ul>
+    </div>
+  </aside>
+
+  <!-- ② 中间：上下三块 -->
+  <section class="center">
+    <!-- 流线动效：常驻，说话时随音量大幅起伏 -->
+    <canvas id="orb" width="264" height="264" aria-hidden="true"></canvas>
+    <!-- 上：每轮流式输入 + 情绪/实体/schema 标签 -->
+    <div class="block io-in">
+      <div class="block-h">流式输入 · Live input</div>
+      <div class="live-text" id="liveInput">…</div>
+      <input id="textIn" class="textin" placeholder="或直接打字回车测试（无需麦克风/ASR 模型）" />
+      <div class="tags" id="tags"></div>
+    </div>
+    <!-- 中：左右脑分别召回 top-k -->
+    <div class="block recall">
+      <div class="block-h">Top-K 召回 · left / right</div>
+      <div class="recall-cols">
+        <div class="rc l">
+          <div class="rc-h">左脑 · 事实</div>
+          <ul id="recallL">
+            <li><span>上次也在这家拉面店吃过</span><span class="sc">0.82</span></li>
+            <li><span>Alex 是同组同事</span><span class="sc">0.77</span></li>
+            <li><span>今天下午有季度评审</span><span class="sc">0.71</span></li>
+          </ul>
+        </div>
+        <div class="rc r">
+          <div class="rc-h">右脑 · 画像</div>
+          <ul id="recallR">
+            <li><span>评审场景常伴随焦虑</span><span class="sc">0.79</span></li>
+            <li><span>偏好清汤、口味清淡</span><span class="sc">0.68</span></li>
+            <li><span>压力大时喜欢被安抚</span><span class="sc">0.61</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <!-- 下：流式 AI 回复 + 语音指示器 -->
+    <div class="block io-out">
+      <div class="block-h">AI 回复 · Reply</div>
+      <div class="reply" id="reply">…</div>
+      <div class="io-foot">
+        <div class="voice" id="voice">
+          <div class="ear-wrap"><span class="ring"></span>
+            <svg class="ear" width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="#9fd0ff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 17.6c-1.7-1.2-2.7-3.2-2.7-5.5C6.3 8.7 8.9 6.3 12.2 6.3c3.1 0 5.4 2.1 5.4 5 0 2.1-1.6 3-2.7 4.1-.8.8-.6 2-1.6 2.8-1 .8-2.4.4-2.7-.7"/>
+              <path d="M10.7 12.4c.3-1.4 1.7-2.2 3-1.7"/>
+            </svg>
+          </div>
+          <canvas id="wave"></canvas>
+          <span class="lab" id="voiceLab">idle</span>
+        </div>
+        <button class="talk" id="talkBtn">开始对话</button>
+      </div>
+    </div>
+  </section>
+
+  </section><!-- /leftpane -->
+
+  <!-- ③ 右板块：Chat（当前 session 原文） / Memory Space（全局脑图）-->
+  <section class="rightpane">
+    <div class="switch">
+      <button id="tabChat" class="on">Chat</button>
+      <button id="tabMem">Memory Space</button>
+      <div class="dl">
+        <input id="dlName" class="dl-name" value="voicemem-memories" spellcheck="false" />
+        <button id="dlBtn" class="dl-btn">下载记忆</button>
+      </div>
+    </div>
+
+    <div class="view" id="viewChat">
+      <div class="chat" id="chatLog"><div class="empty">还没有对话。说点什么，或在左边打字。</div></div>
+    </div>
+
+    <div class="view hide" id="viewMem">
+      <div class="brainwrap">
+    <div id="stage">
+      <img id="brain" alt="" src="./images/background.webp" />
+      <canvas id="fx"></canvas>
+      <div id="card" aria-hidden="true">
+        <div class="eb"><span class="sw" id="c-sw"></span><span class="kd" id="c-kd">entity</span><span class="id" id="c-id">#0000</span></div>
+        <div class="cbody" id="c-body">…</div>
+        <div class="ft"><span id="c-src">voice · 00:00</span><span>— — —</span></div>
+      </div>
+    </div>
+    </div><!-- /brainwrap -->
+    </div><!-- /viewMem -->
+  </section>
+
+</div>
+
+<script>
+(function(){
+const G = {"nodes":[{"x":0.265,"y":0.2305,"k":"label","r":0,"w":"work"},{"x":0.3827,"y":0.332,"k":"label","r":0,"w":"health"},{"x":0.4117,"y":0.56,"k":"label","r":0,"w":"relationships"},{"x":0.3303,"y":0.7428,"k":"label","r":0,"w":"finance"},{"x":0.1997,"y":0.7428,"k":"label","r":0,"w":"goals"},{"x":0.1183,"y":0.56,"k":"label","r":0,"w":"daily_life"},{"x":0.1473,"y":0.332,"k":"label","r":0,"w":"knowledge"},{"x":0.735,"y":0.2767,"k":"label","r":0,"w":"emotion"},{"x":0.843,"y":0.6116,"k":"label","r":0,"w":"experiences"},{"x":0.627,"y":0.6117,"k":"label","r":0,"w":"preference"},{"x":0.5,"y":0.52,"k":"user","r":8.4,"w":"you"}],"links":[{"a":10,"b":0,"t":"in","w":0.3},{"a":10,"b":1,"t":"in","w":0.3},{"a":10,"b":2,"t":"in","w":0.3},{"a":10,"b":3,"t":"in","w":0.3},{"a":10,"b":4,"t":"in","w":0.3},{"a":10,"b":5,"t":"in","w":0.3},{"a":10,"b":6,"t":"in","w":0.3},{"a":10,"b":7,"t":"in","w":0.3},{"a":10,"b":8,"t":"in","w":0.3},{"a":10,"b":9,"t":"in","w":0.3}]};
+
+/* ---- fitting the graph onto whatever plate is supplied ----------------
+   The layout was authored on a reference plate; on load we measure the
+   cortex in the actual background image and scale the graph to match.
+   scale: shrink/grow the whole graph   dx/dy: nudge it (1 = plate width)
+   rightShift: move right-brain nodes horizontally (0.02 = 2% plate width) */
+const CFG = { fit:true, scale:1.77, dx:0, dy:0, rightShift:0.02, maxStretch:1.3 };
+const P  = 0.953;                                   // reference plate h/w
+const MY = {
+  x0:0.0219, x1:0.9688, y0:0.0361, y1:0.9475, mid:0.4906,
+  L:{ x0:0.0219, x1:0.4688, y0:0.0361, y1:0.9475 },
+  R:{ x0:0.5094, x1:0.9688, y0:0.0361, y1:0.9475 }
+};
+let DET = null;
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const stage = document.getElementById('stage');
+const cv    = document.getElementById('fx');
+const ctx   = cv.getContext('2d', {alpha:true});
+const card  = document.getElementById('card');
+const cKd   = document.getElementById('c-kd');
+const cId   = document.getElementById('c-id');
+const cSw   = document.getElementById('c-sw');
+const cSrc  = document.getElementById('c-src');
+const cBody = document.getElementById('c-body');
+
+// SlotV2 簇的简短描述（悬停簇标签时显示；键为 label 的 w）
+const SLOT_DESC = {
+  work:'工作 · 职业/公司/项目/同事/会议/汇报',
+  finance:'财务 · 收入/薪资/投资/支出/存款/理财',
+  relationships:'人际 · 家人/朋友/感情/社交',
+  health:'健康 · 运动/饮食/睡眠/身体/情绪/压力',
+  goals:'目标 · 计划/梦想/未来/成长/自我提升',
+  daily_life:'日常 · 爱好/习惯/娱乐/生活方式',
+  knowledge:'知识 · 学习/技能/概念/技术/研究',
+  emotion:'情绪 · 当前及历史的情感倾向',
+  experiences:'经历 · 值得记住的事件与回应经验',
+  preference:'偏好 · 沟通与内容上的个人偏好',
+};
+const brain = document.getElementById('brain');
+
+const PAL = {
+  hub:'#ff3d8b', core:'#62c8ff', entity:'#4aa8f0', person:'#a583ff',
+  know:'#58e08d', emotion:'#ff5fa2', exper:'#ff9a3c', prefer:'#4ade80',
+  label:'#ffffff', user:'#d02fa8'
+};
+const MONOF = getComputedStyle(document.body).fontFamily;
+const LABEL = {
+  hub:'Core Index', core:'Entity Cluster', entity:'Entity', person:'Person',
+  know:'Knowledge', emotion:'Emotion', exper:'Experience', prefer:'Preference',
+  label:'Cluster', user:'You · owner'
+};
+const SRC = {
+  hub:'index · rebuilt', core:'cluster · 12 refs', entity:'voice · 00:',
+  person:'voice · 00:', know:'derived · note', emotion:'valence · —',
+  exper:'episode · 00:', prefer:'inferred · —',
+  label:'cluster · ', user:'identity · anchor'
+};
+const GROUP = { entity:['entity','core','hub'], person:['person','user'], know:['know'],
+                emotion:['emotion'], exper:['exper'], prefer:['prefer'] };
+
+/* ---------- node runtime ---------- */
+const N = G.nodes.map((n,i)=>({
+  bx:n.x, by:n.y, side:(n.x < MY.mid ? 'L' : 'R'), sx:0, sy:0,
+  k:n.k, r:n.r, c:n.c, w:n.w||'', bw:0, bh:0,
+  ph:Math.random()*Math.PI*2, ph2:Math.random()*Math.PI*2,
+  sp:0.28+Math.random()*0.42, ax:0.55+Math.random()*0.9, ay:0.55+Math.random()*0.9,
+  x:0, y:0, h:0, p:0, f:1, iv:0, id:i,
+  dl: 0.35 + n.x*1.05 + (n.k==='hub'?-0.3:0)
+}));
+const L = G.links;
+// 这一次检索的跨脑光束：[{l:{a,b}}]，走完就清空。搜索时由 brainBeam() 填。
+const BEAM = [];
+const USER = N.findIndex(n=>n.k==='user');
+const PULSE = { t:-0.6, dur:2.3, gap:1.9, trail:0.30, seg:30 };
+const ADJ = N.map(()=>[]);
+const NB  = N.map(()=>[]);
+L.forEach((l,i)=>{ ADJ[l.a].push(i); ADJ[l.b].push(i); NB[l.a].push(l.b); NB[l.b].push(l.a); });
+N.forEach((n,i)=>{ n.cnt = L.reduce((s,l)=> s + ((l.t==='in' && l.a===i)?1:0), 0); });
+
+const LSTYLE = {
+  in:    ['rgba(150,192,235,',0.19,0.75],
+  box:   ['rgba(171,133,255,',0.46,2.30],
+  spine: ['rgba(232,240,255,',0.26,0.90],
+  spoke: ['rgba(186,212,246,',0.13,0.70],
+  field: ['rgba(255,170,200,',0.17,0.80],
+  cross: ['rgba(214,228,255,',0.20,1.45]
+};
+
+/* ---------- sizing ---------- */
+let W=0,H=0,S=1,DPR=1,IW=0,IH=0,OX=0,OY=0,K=1,CX=0,CY=0;
+let AR = 1000/953;       // overwritten by the plate's own ratio once loaded
+function resize(){
+  const r = stage.getBoundingClientRect();
+  W = r.width; H = r.height;
+  DPR = Math.min(2, window.devicePixelRatio||1);
+  cv.width = Math.round(W*DPR); cv.height = Math.round(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  IW = W; IH = W/AR;                       // letterbox exactly like object-fit:contain
+  if(IH > H){ IH = H; IW = H*AR; }
+  OX = (W-IW)/2; OY = (H-IH)/2;
+  // one uniform transform for the whole graph, so the two halves keep the
+  // spacing they were drawn with; the scale is capped by the narrower
+  // hemisphere of the supplied plate so nothing spills past the outline
+  const d = (CFG.fit && DET) ? DET : MY;
+  let s = Infinity;
+  for(const side of ['L','R'])
+    s = Math.min(s, ((d[side].x1-d[side].x0)*IW) / (MY[side].x1-MY[side].x0));
+  s = Math.min(s, ((d.y1-d.y0)*IH) / ((MY.y1-MY.y0)*P));
+  K = s * CFG.scale;  S = K/1000;
+  CX = OX + ((d.x0+d.x1)/2)*IW + CFG.dx*K;
+  CY = OY + ((d.y0+d.y1)/2)*IH + CFG.dy*K;
+  const mcx = (MY.x0+MY.x1)/2, mcy = (MY.y0+MY.y1)/2;
+  for(const n of N){
+    n.sx = CX + (n.bx-mcx)*K + (n.side==='R' ? CFG.rightShift*IW : 0);
+    n.sy = CY + (n.by-mcy)*P*K;
+  }
+  // 背景脑图跟着 CFG.scale 一起缩放（绕脑轮廓中心），和节点图谱同步放大、保持对齐
+  const pcx=(d.x0+d.x1)/2, pcy=(d.y0+d.y1)/2;
+  brain.style.transformOrigin = ((OX+pcx*IW)/W*100)+'% '+((OY+pcy*IH)/H*100)+'%';
+  brain.style.transform = 'translate('+(CFG.dx*K).toFixed(1)+'px,'+(CFG.dy*K).toFixed(1)+'px) scale('+CFG.scale+')';
+  buildGlow();
+}
+new ResizeObserver(resize).observe(stage);
+
+/* ---------- pre-rendered glow sprites ---------- */
+const GLOW = {};
+function buildGlow(){
+  for(const k in PAL){
+    if(k==='label') continue;
+    const R = Math.max(18, Math.round((k==='user'? 150 : 56)*S));
+    const c = document.createElement('canvas');
+    c.width = c.height = R*2;
+    const g = c.getContext('2d');
+    const rg = g.createRadialGradient(R,R,0,R,R,R);
+    const col = PAL[k];
+    rg.addColorStop(0,   hexa(col,.55));
+    rg.addColorStop(.28, hexa(col,.20));
+    rg.addColorStop(.62, hexa(col,.05));
+    rg.addColorStop(1,   hexa(col,0));
+    g.fillStyle = rg; g.fillRect(0,0,R*2,R*2);
+    GLOW[k] = c;
+  }
+}
+function hexa(h,a){
+  const n = parseInt(h.slice(1),16);
+  return 'rgba('+(n>>16)+','+(n>>8&255)+','+(n&255)+','+a+')';
+}
+
+/* ---------- pointer ---------- */
+let mx=-9999, my=-9999, has=false, sel=-1, selPrev=-1;
+let cardX=0, cardY=0, cardTX=0, cardTY=0, cardSide=1, cardShown=false;
+stage.addEventListener('pointermove', e=>{
+  const r = cv.getBoundingClientRect();
+  mx = e.clientX-r.left; my = e.clientY-r.top; has = true;
+}, {passive:true});
+stage.addEventListener('pointerdown', e=>{
+  const r = cv.getBoundingClientRect();
+  mx = e.clientX-r.left; my = e.clientY-r.top; has = true;
+}, {passive:true});
+stage.addEventListener('pointerleave', ()=>{ has=false; mx=my=-9999; }, {passive:true});
+
+/* ---------- legend focus ---------- */
+let focus = null;
+document.querySelectorAll('.key').forEach(el=>{
+  const set = v => { focus = v; document.querySelectorAll('.key').forEach(o=>o.style.opacity = (v && o!==el) ? .38 : 1); };
+  el.addEventListener('pointerenter', ()=>set(el.dataset.k));
+  el.addEventListener('pointerleave', ()=>set(null));
+});
+
+/* ---------- loop ---------- */
+let t0 = performance.now(), tPrev = t0;
+function frame(now){
+  const t = (now-t0)/1000;
+  const dt = Math.min(0.05, (now-tPrev)/1000); tPrev = now;
+  ctx.clearRect(0,0,W,H);
+
+  // intro sweep
+  for(const n of N){
+    const u = Math.min(1, Math.max(0, (t-n.dl)/0.75));
+    n.iv = 1-Math.pow(1-u,3);
+  }
+
+  // positions
+  // 3.1 只有 2-4 像素，静止时看不出在动。4.6 仍然是飘，不是晃。
+  const amp = REDUCED ? 0 : 4.6*S;
+  for(const n of N){
+    n.x = n.sx + Math.sin(t*n.sp + n.ph)*amp*n.ax;
+    n.y = n.sy + Math.cos(t*n.sp*0.83 + n.ph2)*amp*n.ay;
+  }
+
+  // nearest node to cursor
+  let best=-1, bd=1e9;
+  if(has){
+    for(const n of N){
+      let d;
+      if(n.k==='label' && n.bw){
+        const dx=Math.max(Math.abs(n.x-mx)-n.bw/2,0), dy=Math.max(Math.abs(n.y-my)-n.bh/2,0);
+        d = Math.hypot(dx,dy);
+      } else {
+        d = Math.max(0, Math.hypot(n.x-mx, n.y-my) - n.r*2.0*S*0.85);
+      }
+      if(d<bd){ bd=d; best=n.id; }
+    }
+    if(bd > Math.max(24, 40*S)) best = -1;
+  }
+  sel = best;
+
+  // per-node easing — everything wired to the hovered node lifts with it
+  const fieldR = 150*S;
+  const lit = new Set(sel>=0 ? NB[sel] : []);
+  for(const n of N){
+    const tgtH = Math.max((n.id===sel) ? 1 : (lit.has(n.id) ? 0.42 : 0), n.act||0);
+    n.h += (tgtH-n.h) * (tgtH ? .22 : .10);
+    let p = 0;
+    if(has){
+      const d = Math.hypot(n.x-mx, n.y-my);
+      p = d<fieldR ? (1-d/fieldR) : 0;  p *= p;
+    }
+    n.p += (p-n.p)*.14;
+    const tgtF = (!focus || n.k==='label' || GROUP[focus].indexOf(n.k)>=0) ? 1 : .16;
+    n.f += (tgtF-n.f)*.12;
+  }
+
+  /* links */
+  ctx.lineCap = 'round';
+  for(const l of L){
+    const a=N[l.a], b=N[l.b];
+    const st = LSTYLE[l.t] || LSTYLE.in;
+    const lift = Math.max(a.h,b.h)*.38 + Math.max(a.p,b.p)*.14;
+    const fade = Math.min(a.f,b.f);
+    const al = (st[1]*(l.w||1) + lift) * fade * Math.min(a.iv,b.iv);
+    if(al<=0.006) continue;
+    ctx.strokeStyle = st[0]+al.toFixed(3)+')';
+    ctx.lineWidth = (st[2]*(1+lift*1.5))*Math.max(.72,S);
+    ctx.beginPath();
+    ctx.moveTo(a.x,a.y);
+    if(l.t==='cross'){
+      const c = ctl(a,b); ctx.quadraticCurveTo(c[0],c[1],b.x,b.y);
+    } else ctx.lineTo(b.x,b.y);
+    ctx.stroke();
+  }
+
+  /* one synchronised pulse of light runs every callosum strand */
+  // 检索完才放这道光：从左脑命中的事实射向右脑命中的画像，
+  // 走完一遍就停（BEAM 清空），不再无限循环——它表示"这一次检索发生了跨脑联合"。
+  if(!REDUCED && BEAM.length){
+    PULSE.t += dt/PULSE.dur;
+    if(PULSE.t > 1 + PULSE.trail){ BEAM.length = 0; PULSE.t = -0.02; }
+    if(PULSE.t > -PULSE.trail){
+      ctx.globalCompositeOperation='lighter';
+      ctx.lineCap='round'; ctx.lineJoin='round';
+      const STEP = PULSE.trail/PULSE.seg;
+      for(const p of BEAM){
+        const a=N[p.l.a], b=N[p.l.b], c=ctl(a,b);
+        const f = Math.min(a.f,b.f)*Math.min(a.iv,b.iv);
+        if(f < .05) continue;
+        const at = u => { const iu=1-u;
+          return [iu*iu*a.x + 2*iu*u*c[0] + u*u*b.x, iu*iu*a.y + 2*iu*u*c[1] + u*u*b.y]; };
+        // soft halo, then the bright core — both as continuous tapering strokes
+        for(let pass=0; pass<2; pass++){
+          for(let i=0;i<PULSE.seg;i++){
+            const u1 = PULSE.t - i*STEP, u0 = u1 - STEP;
+            if(u1 <= 0 || u0 >= 1) continue;
+            const q0 = at(Math.max(0,u0)), q1 = at(Math.min(1,u1));
+            const k = 1 - i/PULSE.seg;                  // 1 at the head, 0 at the tail
+            const e = k*k*(3-2*k);                      // smoothstep taper
+            ctx.strokeStyle = pass ? 'rgba(255,255,255,'+(0.55*e*f).toFixed(3)+')'
+                                   : 'rgba(180,210,255,'+(0.10*e*f).toFixed(3)+')';
+            ctx.lineWidth = (pass ? 1.5*e + .45 : 5.0*e + 1.2)*Math.max(.8,S);
+            ctx.beginPath(); ctx.moveTo(q0[0],q0[1]); ctx.lineTo(q1[0],q1[1]); ctx.stroke();
+          }
+        }
+      }
+      ctx.globalCompositeOperation='source-over';
+    }
+  }
+
+  /* glow */
+  ctx.globalCompositeOperation='lighter';
+  for(const n of N){
+    const g = GLOW[n.k]; if(!g) continue;
+    const base = n.r*2.0*S;
+    const k = (base*2.6) * (1 + n.h*1.15 + n.p*.24);
+    // 基线从 .36 压到 .16。composite=lighter 是相加的，一屏节点静止全亮必然过曝。
+    // 但压完之后静止的脑图就死了——原来那层常亮的光本身在起伏，看着是活的。
+    // 补一层极慢的呼吸微光：±25% 幅度、约 8 秒一轮、按 n.ph 错开相位。
+    // 幅度必须小：一屏节点同步亮起来像心跳，错开且轻才像有生命。
+    const idle = REDUCED ? 1 : (1 + 0.25*Math.sin(t*0.78 + n.ph));
+    const a = (0.16*idle + n.h*.62 + n.p*.22) * n.f * n.iv;
+    ctx.globalAlpha = Math.min(1,a);
+    ctx.drawImage(g, n.x-k, n.y-k, k*2, k*2);
+  }
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation='source-over';
+
+  /* shapes */
+  for(const n of N){
+    if(n.k==='label') continue;
+    const s = (1 + n.h*.55 + n.p*.13) * (0.35 + 0.65*n.iv);
+    const r = n.r*2.0*S*s;
+    const a = (0.72 + n.h*.28) * n.f * n.iv;
+    ctx.strokeStyle = hexa(PAL[n.k], a);
+    ctx.fillStyle   = hexa(PAL[n.k], a*.16);
+    ctx.lineWidth   = Math.max(.8, (n.k==='entity'||n.k==='know' ? 1.05 : 1.45)*Math.max(.8,S)*(1+n.h*.35));
+    shape(n,r);
+  }
+
+  /* the owner keeps breathing out faint rings */
+  if(!REDUCED && USER>=0){
+    const u = N[USER], base = u.r*2.0*S;
+    ctx.globalCompositeOperation='lighter';
+    for(let q=0;q<2;q++){
+      const ph = ((t/3.4) + q*0.5) % 1;
+      const rr = base*(1 + ph*3.2);
+      const al = (1-ph)*(1-ph)*0.42*u.iv;
+      if(al < .004) continue;
+      ctx.strokeStyle = hexa(PAL.user, al);
+      ctx.lineWidth = Math.max(.7, (1.5-ph)*Math.max(.8,S));
+      ctx.beginPath(); ctx.arc(u.x, u.y, rr, 0, 6.2832); ctx.stroke();
+    }
+    ctx.globalCompositeOperation='source-over';
+  }
+
+  /* cluster frames */
+  const FS = Math.max(8.4, 11.4*S);
+  ctx.font = FS.toFixed(1)+'px '+MONOF;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  if('letterSpacing' in ctx) ctx.letterSpacing = (FS*.06).toFixed(2)+'px';
+  for(const n of N){
+    if(n.k!=='label' && n.k!=='user') continue;
+    const tw = ctx.measureText(n.w).width;
+    const bw = tw + FS*1.6, bh = FS*1.95;
+    const cy = n.k==='user' ? n.y + n.r*2.0*S + bh*.95 : n.y;
+    if(n.k==='label'){ n.bw = bw; n.bh = bh; }
+    const a = n.iv * (n.k==='user' ? 1 : 1) * (0.62 + n.h*.38);
+    ctx.beginPath(); rrect(n.x-bw/2, cy-bh/2, bw, bh, 1.5);
+    ctx.fillStyle = 'rgba(0,0,0,'+(0.9*n.iv).toFixed(3)+')'; ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,'+(a*.13).toFixed(3)+')';
+    ctx.lineWidth = Math.max(2.2, 3.4*Math.max(.85,S)); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,'+(a*(n.k==='user'?.8:1)).toFixed(3)+')';
+    ctx.lineWidth = Math.max(.7, 1.05*Math.max(.85,S));
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,'+(n.iv*(0.97+n.h*.03)).toFixed(3)+')';
+    ctx.fillText(n.w, n.x + FS*.055, cy + FS*.06);
+  }
+  if('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+
+  /* 被检索命中的点：外圈亮一道白光。
+     跟 hover 那个旋转虚线环是两回事——那个表示"鼠标指着"，这个表示
+     "这一轮检索取到了它"，所以一直亮着到下一次检索，并且轻微呼吸。 */
+  ctx.globalCompositeOperation = 'lighter';
+  for(const n of N){
+    if(!n.hit) continue;
+    const pulse = 0.78 + 0.22*Math.sin(t*2.2 + n.ph);
+    const base = n.r*2.0*S + 4.5*Math.max(.7,S);
+    ctx.beginPath(); ctx.arc(n.x, n.y, base + 3.2*Math.max(.7,S), 0, 6.2832);
+    ctx.strokeStyle = 'rgba(170,215,255,'+(0.26*n.hit*pulse).toFixed(3)+')';
+    ctx.lineWidth = Math.max(3.0, 4.6*S);
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(n.x, n.y, base, 0, 6.2832);
+    ctx.strokeStyle = 'rgba(214,232,255,'+(0.62*n.hit*pulse).toFixed(3)+')';
+    ctx.lineWidth = Math.max(1.1, 1.5*S);
+    ctx.stroke();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+
+  /* selection reticle */
+  for(const n of N){
+    if(n.h<.02) continue;
+    const r = (n.k==='label' ? Math.hypot(n.bw,n.bh)/2 + 8*Math.max(.7,S)
+                             : n.r*2.0*S*(1+n.h*.55))
+              + (9 + n.h*5)*Math.max(.7,S);
+    ctx.save();
+    ctx.translate(n.x,n.y); ctx.rotate(t*.35);
+    ctx.strokeStyle = 'rgba(255,255,255,'+(0.42*n.h).toFixed(3)+')';
+    ctx.lineWidth = Math.max(.7,S*.9);
+    ctx.setLineDash([2.4*Math.max(.8,S), 5.6*Math.max(.8,S)]);
+    ctx.beginPath(); ctx.arc(0,0,r,0,6.2832); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(255,255,255,'+(0.6*n.h).toFixed(3)+')';
+    const tick = 3.4*Math.max(.8,S);
+    for(let i=0;i<4;i++){
+      const ang = i*Math.PI/2 + Math.PI/4;
+      const cx=Math.cos(ang), cy=Math.sin(ang);
+      ctx.beginPath();
+      ctx.moveTo(cx*(r-tick), cy*(r-tick));
+      ctx.lineTo(cx*(r+tick), cy*(r+tick));
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* card + leader line */
+  updateCard(t);
+
+  requestAnimationFrame(frame);
+}
+
+function ctl(a,b){
+  const mx2=(a.x+b.x)/2, my2=(a.y+b.y)/2;
+  const gx = CX + ((MY.L.x1+MY.R.x0)/2 - (MY.x0+MY.x1)/2)*K;
+  const gy = Math.min(Math.max(my2, CY-0.12*IH), CY+0.17*IH);
+  return [mx2*0.45+gx*0.55, my2*0.72+gy*0.28];
+}
+
+function shape(n,r){
+  const {x,y}=n;
+  ctx.beginPath();
+  if(n.k==='emotion' || n.k==='prefer'){
+    const rr = Math.min(r*.42, 3.2*S);
+    rrect(x-r,y-r,r*2,r*2,rr);
+  } else if(n.k==='exper'){
+    const h=r*1.12;
+    ctx.moveTo(x, y-h); ctx.lineTo(x+r*1.02, y+h*.72); ctx.lineTo(x-r*1.02, y+h*.72); ctx.closePath();
+  } else if(n.k==='user'){
+    const col = PAL.user;
+    ctx.arc(x,y,r,0,6.2832);
+    ctx.fillStyle = hexa(col,.20); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x,y,r*.63,0,6.2832);
+    ctx.strokeStyle = hexa(col,.55*(0.72+n.h*.28)); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x,y,Math.max(1.6,r*.14),0,6.2832);
+    ctx.fillStyle = hexa(col,.95); ctx.fill();
+    return;
+  } else {
+    ctx.arc(x,y,r,0,6.2832);
+  }
+  ctx.fill(); ctx.stroke();
+
+  const col = PAL[n.k];
+  // 实心核：没有它节点就是"一圈描边 + 一团软光"，读起来是个模糊的球。
+  ctx.beginPath();
+  ctx.arc(x, y, Math.max(0.9, r*0.26), 0, 6.2832);
+  ctx.fillStyle = hexa(col, Math.min(1, 0.5 + n.h*0.5));
+  ctx.fill();
+
+  // 悬停 / 命中时套一圈带缺口的环 + 四个刻度，缓慢旋转。
+  const lit = Math.max(n.h, n.hit || 0) * n.iv;
+  if(lit > 0.02){
+    const R = r * 1.8, a = lit * 0.6;
+    const rot = REDUCED ? 0 : (_nowT() * 0.55) % 6.2832;
+    ctx.lineWidth = Math.max(.7, .9*S);
+    ctx.strokeStyle = hexa(col, a);
+    for(let q = 0; q < 2; q++){
+      ctx.beginPath();
+      ctx.arc(x, y, R, rot + q*Math.PI + 0.44, rot + q*Math.PI + Math.PI - 0.44);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    for(let q = 0; q < 4; q++){
+      const tt = rot + q * Math.PI/2 + Math.PI/4;
+      ctx.moveTo(x + Math.cos(tt)*R*1.18, y + Math.sin(tt)*R*1.18);
+      ctx.lineTo(x + Math.cos(tt)*R*1.46, y + Math.sin(tt)*R*1.46);
+    }
+    ctx.strokeStyle = hexa(col, a * 0.75);
+    ctx.stroke();
+  }
+}
+function rrect(x,y,w,h,r){
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);     ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+
+function updateCard(t){
+  if(sel>=0){
+    const n = N[sel];
+    if(sel!==selPrev){
+      selPrev = sel;
+      // 右脑节点写真实 slot 名（情绪 / 应对方式 / 喜好与厌恶…）。脑图只有三个簇，
+      // 6 个 slot 压进去后卡片写 EXPERIENCE 而内容是"应对方式"，对不上号。
+      cKd.textContent = n.k==='label' ? n.w
+                      : n.k==='user' ? 'You · owner'
+                      : ((window.rbSlotOf && window.rbSlotOf(n.id)) || LABEL[n.k]);
+      cId.textContent = '#'+String(1000+n.id*7%8999).padStart(4,'0');
+      cSw.style.borderColor = PAL[n.k];
+      const s = SRC[n.k];
+      const rbSlot = window.rbSlotOf && window.rbSlotOf(n.id);
+      cSrc.textContent = n.k==='label' ? ('cluster · '+n.cnt+' items')
+                       : rbSlot        ? ('right brain · ' + rbSlot)
+                       : (s.endsWith('00:') ? s+String(10+n.id%49).padStart(2,'0') : s);
+      // 内容区：簇 → 描述；实体/记忆节点 → 该节点的记忆文本(n.w)；无内容给占位
+      // 右脑节点：除了这个"点"本身，还要显示它是怎么来的——挂在下面的一条条
+      // 感受，以及每条感受对应的那件事。光说"用户感到委屈"没有信息量。
+      const rb = window.rbDetailOf && window.rbDetailOf(n.id);
+      cBody.textContent = n.k==='label' ? ((window.SLOT_SUMMARIES && window.SLOT_SUMMARIES[n.w]) || SLOT_DESC[n.w] || n.w)
+                        : n.k==='user'  ? '账号主人 · this account'
+                        : rb            ? rb
+                        : (n.w || '（暂无记忆内容）');
+    }
+    const w = card.offsetWidth, h = card.offsetHeight;
+    const gap = 34*Math.max(.8,S);
+    // push the card outward, into the dark margin beside the cortex
+    cardSide = (n.x < CX) ? -1 : 1;
+    let tx = n.x + (cardSide>0 ? gap : -gap-w);
+    let ty = n.y - h/2;
+    const off = stage.getBoundingClientRect();
+    const lo = -off.left + 10, hi = window.innerWidth - off.left - w - 10;
+    tx = Math.min(Math.max(tx, lo), Math.max(lo, hi));
+    ty = Math.min(Math.max(ty, -off.top + 10), window.innerHeight - off.top - h - 10);
+    cardTX = tx; cardTY = ty;
+    if(!cardShown){ cardX=tx; cardY=ty; cardShown=true; card.classList.add('on'); }
+  } else if(cardShown){
+    cardShown = false; card.classList.remove('on');
+  }
+
+  if(cardShown){
+    cardX += (cardTX-cardX)*.22;
+    cardY += (cardTY-cardY)*.22;
+    card.style.transform = 'translate3d('+cardX.toFixed(1)+'px,'+cardY.toFixed(1)+'px,0) scale(1)';
+    const n = N[sel];
+    const ax = cardSide>0 ? cardX : cardX+card.offsetWidth;
+    const ay = cardY + card.offsetHeight/2;
+    ctx.strokeStyle = 'rgba(255,255,255,'+(0.5*n.h).toFixed(3)+')';
+    ctx.lineWidth = Math.max(.7,S*.85);
+    ctx.beginPath();
+    ctx.moveTo(n.x + Math.sign(ax-n.x)*(n.r*2.0*S+6), n.y);
+    ctx.lineTo(ax - Math.sign(ax-n.x)*3, ay);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(ax - Math.sign(ax-n.x)*3, ay, 1.6, 0, 6.2832);
+    ctx.fillStyle = 'rgba(255,255,255,'+(0.7*n.h).toFixed(3)+')';
+    ctx.fill();
+  }
+}
+
+resize();
+requestAnimationFrame(frame);
+if(matchMedia('(pointer:coarse)').matches){
+  const h=document.querySelector('.hint'); if(h) h.textContent='TAP THE CORTEX';
+}
+function measurePlate(img){
+  try{
+    const w = 320, h = Math.max(1, Math.round(320*img.naturalHeight/img.naturalWidth));
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const g = c.getContext('2d', {willReadFrequently:true});
+    g.drawImage(img, 0, 0, w, h);
+    const d = g.getImageData(0, 0, w, h).data;
+    const col = new Float32Array(w), row = new Float32Array(h);
+    for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+      const i=(y*w+x)*4, l=Math.max(d[i],d[i+1],d[i+2])*(d[i+3]/255);
+      if(l>34){ col[x]++; row[y]++; }
+    }
+    const span = a => {
+      let m=0; for(const v of a) m=Math.max(m,v);
+      const th = Math.max(1, m*0.03); let i=0, j=a.length-1;
+      while(i<a.length && a[i]<th) i++;
+      while(j>i && a[j]<th) j--;
+      return [i/a.length, (j+1)/a.length];
+    };
+    const [x0,x1] = span(col), [y0,y1] = span(row);
+    if(x1-x0 < 0.2 || y1-y0 < 0.2) return null;
+    const a = Math.round(x0*w), z = Math.round(x1*w);
+    let c0 = Math.round(a+(z-a)*0.37), c1 = Math.round(a+(z-a)*0.63), mid = c0;
+    for(let x=c0;x<c1;x++) if(col[x] < col[mid]) mid = x;
+    const boxOf = (xa, xb) => {
+      const cc = new Float32Array(xb-xa), rr = new Float32Array(h);
+      for(let y=0;y<h;y++) for(let x=xa;x<xb;x++){
+        const i=(y*w+x)*4, l=Math.max(d[i],d[i+1],d[i+2])*(d[i+3]/255);
+        if(l>34){ cc[x-xa]++; rr[y]++; }
+      }
+      const [p,q] = span(cc), [u,v] = span(rr);
+      return { x0:(xa+p*(xb-xa))/w, x1:(xa+q*(xb-xa))/w, y0:u, y1:v };
+    };
+    const Lb = boxOf(a, mid), Rb = boxOf(mid, z);
+    if(Lb.x1-Lb.x0 < 0.08 || Rb.x1-Rb.x0 < 0.08) return null;
+    return {x0,x1,y0,y1,mid:mid/w,L:Lb,R:Rb};
+  }catch(e){ return null; }   // tainted canvas etc. -> fall back
+}
+function plateLoaded(){
+  if(brain.naturalWidth) AR = brain.naturalWidth/brain.naturalHeight;
+  DET = measurePlate(brain);
+  resize(); brain.classList.add('in');
+}
+if(brain.complete && brain.naturalWidth) plateLoaded();
+else brain.addEventListener('load', plateLoaded);
+
+/* ---- 外部激活：按 schema(簇标签) / 节点类型 点亮脑图节点 ----
+   window.brainActivate({schemas:['food'], kinds:['entity','emotion']}) 会把对应
+   的 schema 簇(标签+其成员)和指定类型的节点持续点亮；window.brainClear() 复位。 */
+const LABEL_BY_W = {};
+N.forEach((n,i)=>{ if(n.k==='label' && n.w) LABEL_BY_W[n.w.toLowerCase()] = i; });
+window.brainActivate = function(opts){
+  opts = opts || {};
+  const schemas = (opts.schemas||[]).map(s=>String(s).toLowerCase());
+  const kinds = new Set(opts.kinds||[]);
+  for(const n of N) n.act = 0;
+  for(const s of schemas){                       // schema 簇：标签节点 + 直接相连的成员
+    const li = LABEL_BY_W[s];
+    if(li==null) continue;
+    N[li].act = 1;
+    for(const nb of NB[li]) N[nb].act = Math.max(N[nb].act, 0.6);
+  }
+  if(kinds.size) for(const n of N) if(kinds.has(n.k)) n.act = Math.max(n.act, 0.62);
+};
+window.brainClear = function(){ for(const n of N) n.act = 0; };
+// 脑图藏起来时容器尺寸是 0；从 Chat 切回 Memory Space 后要重算一次。
+window.brainResize = resize;
+// 这一轮检索命中了哪些节点 → 它们的外圈亮起来，到下一次检索为止。
+// 簇名（emotion / experiences / preference / work…）→ 该簇标签节点的 id。
+// 给检索光束用：命中的右脑内容如果没有自己的节点（profile / response_experience
+// 是整簇的总结，本来就不该单独占一个点），光束就射向它所属的那个簇。
+window.brainClusterNode = function(w){
+  return LABEL_BY_W[String(w||'').toLowerCase()];
+};
+
+window.brainHighlight = function(ids){
+  for(const n of N) n.hit = 0;
+  for(const id of ids) if(N[id]) N[id].hit = 1;
+};
+
+
+// 两条记忆讲同一个人/同一件事 → 连一条线。由前端在铺记忆时按实体交集调用。
+window.brainLink = function(idA, idB){
+  if(idA === idB) return;
+  for(const i of ADJ[idA]) if(L[i].a === idB || L[i].b === idB) return;   // 已连过
+  const i = L.length;
+  L.push({a: idA, b: idB, t: 'rel', w: 0.28});
+  ADJ[idA].push(i); ADJ[idB].push(i);
+  NB[idA].push(idB); NB[idB].push(idA);
+};
+
+// 检索时放一道光：从左脑命中射向右脑命中。
+window.brainBeam = function(fromIds, toIds){
+  BEAM.length = 0;
+  for(const a of fromIds){
+    for(const b of toIds){
+      if(N[a] && N[b]) BEAM.push({l: {a: a, b: b}});
+    }
+  }
+  if(BEAM.length) PULSE.t = -PULSE.trail;      // 从头开始走
+};
+
+
+/* ---- 运行时生长：实时对话时往脑图新增节点 + 连线（映射关系）----
+   window.brainAdd(side, kind, label) 在对应半球加一个节点并连到 user 节点，
+   返回 id；带淡入 + 短暂高亮。R_BY_KIND 控制不同类型的点大小。 */
+// 撒点半径。原来 0.092 太紧，同一簇的点挤成一坨看不出结构；放大到 0.135 之后
+// 相邻簇的边缘会轻微交错——那是想要的：记忆本来就不是按格子分的，稍微咬合一点
+// 比泾渭分明更像脑子。半球边界仍然守得住（撒点中心在各自半球，见 brainAdd）。
+//: 半球椭圆。归一化：以半球中心为原点、单位圆为边界，再乘 RX/RY 映射回画布。
+const HEMI_RX = 0.215, HEMI_RY = 0.385;
+const HEMI_CX = { L: 0.265, R: 0.735 };
+//: 簇心所在的环半径，左右分开给。左脑 7 个簇要撑开（簇与簇之间的距离），
+//: 右脑只有 3 个簇、每簇点多，环收一点、把空间让给团本身。
+const CLUSTER_RING = { L: 0.70, R: 0.58 };
+//: 团半径上限 + 增长系数。右脑一簇十几个点，系数小的话点全挤在团心附近——
+//: 光提上限没用，得让它真的长起来。
+const BLOB_MAX = { L: 0.20, R: 0.38 };
+const BLOB_K   = { L: 0.075, R: 0.11 };
+const CLUSTER_N = 20;
+
+function clusterCenter(side, seat, k){
+  const a = -Math.PI / 2 + seat * (Math.PI * 2 / k);
+  const R = CLUSTER_RING[side];
+  return [Math.cos(a) * R, Math.sin(a) * R];
+}
+function toCanvas(side, u, v){
+  return [HEMI_CX[side] + u * HEMI_RX, 0.50 + v * HEMI_RY];
+}
+function seatOf(side, li){
+  return (li != null && li >= 0) ? (li - (side === 'R' ? 7 : 0)) : 0;
+}
+const _clusterCount = {};      // 每个簇已经撒了几个点，决定下一个点在螺旋上的位置
+const R_BY_KIND = { entity:2.6, know:2.6, person:2.6, emotion:5.4, exper:5.0, prefer:5.2 };
+function _nowT(){ return (performance.now()-t0)/1000; }
+window.brainAdd = function(side, kind, label, slot){
+  // slot 给定且脑图里有该 SlotV2 簇标签 → 新节点落到那个簇的团里
+  const li0 = slot!=null ? LABEL_BY_W[String(slot).toLowerCase()] : undefined;
+
+  // 每个簇是一个**独立的团**，团心在半球椭圆内的一个环上。扇形从中心发散的话，
+  // 内端全汇在半球中心，标签挤成一堆、靠中心的点也分不清属于哪个簇。
+  // 这里只落初始位置，真正的排布在 relayout()——那时才知道每簇有几个点。
+  const sideK = side === 'R' ? 'R' : 'L';
+  const kk = sideK === 'R' ? 3 : 7;
+  const seat0 = Math.max(0, Math.min(kk - 1, seatOf(sideK, li0)));
+  const [cu0, cv0] = clusterCenter(sideK, seat0, kk);
+  const [bx, by] = toCanvas(sideK, cu0, cv0);
+
+  const n = {
+    bx, by, side, li:(li0!=null?li0:-1), sx:0, sy:0, k:kind, r:R_BY_KIND[kind]||3.2, w:label||'', bw:0, bh:0,
+    ph:Math.random()*6.28, ph2:Math.random()*6.28,
+    sp:0.28+Math.random()*0.42, ax:0.55+Math.random()*0.9, ay:0.55+Math.random()*0.9,
+    x:0,y:0,h:0,p:0,f:1,iv:0, id:N.length, act:0.95, hit:0, dl:_nowT()
+  };
+  N.push(n); ADJ.push([]); NB.push([]);
+  // 连线（映射关系）：左脑有槽 → 连到该槽的簇标签（归属）；否则连到 user（跨脑）
+  const tgt = li0!=null ? li0 : USER;
+  if(tgt>=0){
+    const t = li0!=null ? 'in' : 'cross';
+    const i = L.length; L.push({a:tgt, b:n.id, t, w:t==='cross'?0.6:0.4});
+    ADJ[tgt].push(i); ADJ[n.id].push(i); NB[tgt].push(n.id); NB[n.id].push(tgt);
+
+  }
+  resize();
+  relayout();
+  return n.id;
+};
+
+// 按每个簇**实际有几个点**重排。建点时不知道总数，只能用写死的参考值，结果是
+// 点少的簇缩在内圈、点多的簇铺到外沿——小簇挤在脑子中部就是这么来的。
+function relayout(){
+  const group = {};
+  for(const n of N){
+    if(n.k==='label' || n.k==='user') continue;
+    const key = n.li>=0 ? ('c'+n.li) : ('free'+n.side);
+    (group[key] || (group[key] = [])).push(n);
+  }
+  for(const key in group){
+    const g = group[key], m = g.length;
+    const side = g[0].side === 'R' ? 'R' : 'L';
+    const k = side === 'R' ? 3 : 7;
+    const seat = Math.max(0, Math.min(k - 1, seatOf(side, g[0].li)));
+    const [cu, cv] = clusterCenter(side, seat, k);
+    const R = Math.min(BLOB_MAX[side], BLOB_K[side] * Math.sqrt(m + 1));
+    for(let i = 0; i < m; i++){
+      const ang = i * 2.399963;                       // 向日葵黄金角
+      const rad = R * Math.sqrt((i + 0.5) / m);       // √ 半径 → 等面积铺满
+      const [x, y] = toCanvas(side, cu + Math.cos(ang) * rad, cv + Math.sin(ang) * rad);
+      g[i].bx = x; g[i].by = y;
+    }
+  }
+  resize();
+}
+})();
+</script>
+<script>
+/* ---- rail collapse + voice indicator + data hooks ------------------------
+   脑图那段脚本保持不动；这里只管新加的左栏收起、语音波形/耳朵、以及把数据
+   灌进三个块的对外钩子（window.vm.*，接后端时调用即可）。 */
+(function(){
+  const app = document.getElementById('app');
+  const toggle = document.getElementById('railToggle');
+  toggle.addEventListener('click', ()=>{
+    const c = app.classList.toggle('rail-collapsed');
+    toggle.textContent = c ? '›' : '‹';
+  });
+
+  // 语音指示器：AI 说话时画波形动线，用户说话时显示一只耳朵（画的，非 emoji）
+  const voice = document.getElementById('voice');
+  const lab   = document.getElementById('voiceLab');
+  const wave  = document.getElementById('wave');
+  const wc    = wave.getContext('2d');
+  const LAB = { idle:'idle · 待机', user:'listening · 用户说话', ai:'speaking · AI 回复' };
+  let vstate = 'idle', vt = 0, amp = 0;
+
+  function setVoiceState(s){
+    vstate = s;
+    voice.className = 'voice' + (s==='ai' ? ' ai' : s==='user' ? ' user' : '');
+    lab.textContent = LAB[s] || s;
+  }
+  function sizeWave(){
+    const r = wave.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio||1);
+    wave.width = Math.max(1, r.width*dpr); wave.height = Math.max(1, r.height*dpr);
+    wc.setTransform(dpr,0,0,dpr,0,0);
+  }
+  new ResizeObserver(sizeWave).observe(wave); sizeWave();
+
+  function waveFrame(){
+    vt += 0.06;
+    const w = wave.clientWidth||150, h = wave.clientHeight||30, mid = h/2;
+    amp += ((vstate==='ai'?1:0) - amp) * 0.12;          // 平滑进出
+    wc.clearRect(0,0,w,h);
+    wc.beginPath();
+    for(let x=0;x<=w;x++){
+      const env = Math.sin(x/w*Math.PI);                 // 两端收窄
+      const y = mid + Math.sin(x*0.14 - vt*2.2) * env * (h*0.4) * amp
+                    * (0.5 + 0.5*Math.sin(vt*1.7 + x*0.05));
+      x ? wc.lineTo(x,y) : wc.moveTo(x,y);
+    }
+    wc.strokeStyle = 'rgba(140,233,179,'+(0.35+0.5*amp).toFixed(2)+')';
+    wc.lineWidth = 1.6; wc.stroke();
+    requestAnimationFrame(waveFrame);
+  }
+  waveFrame();
+
+  // 对外钩子：接后端（WS/REST）时调这些把真实数据灌进来
+  const $ = id => document.getElementById(id);
+  window.vm = {
+    setVoiceState,
+    setInput: t => { $('liveInput').innerHTML = t + '<span class="caret"></span>'; },
+    setReply: t => { $('reply').textContent = t; },
+    setTags: tags => {
+      $('tags').innerHTML = tags.map(t => `<span class="tag ${t.k}"><b>${t.b}</b>${t.v}</span>`).join('');
+      // 标签一变，就按其中的 schema / 类型点亮脑图对应节点
+      const schemas = tags.filter(t=>t.k==='sch').map(t=>t.v);
+      const kinds = tags.some(t=>t.k==='ent') ? ['entity'] : [];
+      if(tags.some(t=>t.k==='emo')) kinds.push('emotion');
+      window.brainActivate && window.brainActivate({schemas, kinds});
+    },
+    setRecall: (side, items) => { $(side==='r'?'recallR':'recallL').innerHTML = items.map(
+      it => `<li><span>${it.text}</span>` +
+
+            `<span class="sc">${it.score}</span></li>`).join(''); },
+    activate: o => window.brainActivate && window.brainActivate(o),
+    clear:   () => window.brainClear && window.brainClear(),
+  };
+
+  /* ================= 实时语音：连 openai_voice_demo 的 WS 后端 =================
+     后端默认 pipeline provider，发 partial_transcript / user_transcript /
+     memory_hits{left_brain,right_brain_hits,current_scene} / answer_start|delta|done
+     + 二进制 24kHz PCM16 回复音频；麦克风上行也是 24kHz PCM16 mono。
+     后端地址默认 ws://<本机>:8787/ws，可用 ?ws=host:port 覆盖。 */
+  const SAMPLE_RATE = 24000;
+  // 预缓冲按模式分：realtime 是 WebSocket 推的稳定流，0.08 开口最快；llm_tts 走
+  // TTS 的 HTTP 流，块到达抖动大得多，缓冲太小时前几秒会一顿一顿（排上的块播完了
+  // 下一块还没到），等积压攒够才顺——就是「前期卡、中后期恢复」那个现象。
+  let PREBUFFER = 0.25;
+  const params = new URLSearchParams(location.search);
+  const WS_HOST = params.get('ws') || ((location.hostname || 'localhost') + ':8787');
+  const WS_URL = (location.protocol==='https:'?'wss://':'ws://') + WS_HOST + '/ws';
+
+  const talkBtn = $('talkBtn');
+  let ws=null, recording=false, micStream=null, micCtx=null, micProc=null;
+  let playCtx=null, scheduled=[], nextPlay=0, replyText='';
+  let pendingClip=null;   // 服务端说这一轮要把当时那段原声放回来（memory_id）
+  let clipSrc=null;       // 正在放的那段原声，随时可以掐掉
+  let turnLogged=false;   // 这一轮的回复进没进 chat（answer_done 和 answer_interrupt 都可能来）
+
+  // 脑图去重：同一条记忆文本只长一次节点；再次命中就跳过（避免刷屏）
+  // MAX_NODES 要能装下「开局铺的已有记忆」+「之后对话新长的」两部分。
+  // 48 只够铺开局（现有库就 60+ 条），说话时就再也长不出新节点了。
+  // MAX_NODES 满了之后 growLeft/growRightIn 返回 undefined，于是「这一轮命中了
+  // 哪些节点」拿不到 id——外圈高亮和跨脑光束一起哑掉，看起来就是"检索过程没有
+  // 可视化"。开局铺的记忆就有一百多条，110 根本不够。
+  const seen = new Map(); let addedCount=0; const MAX_NODES=260;
+  let curSlots = [];                           // 本轮 classify 出的 SlotV2 槽（左脑按此分）
+  const SRC_KIND = { emotion_trait:'emotion', current_signal:'emotion', response_experience:'exper',
+                     situation_pattern:'exper', profile:'prefer', relation:'exper' };
+  const RIGHT_CLUSTER = { emotion:'emotion', exper:'experiences', prefer:'preference' };
+  window.SLOT_SUMMARIES = window.SLOT_SUMMARIES || {};   // {slot: 会话级概括}
+
+  /* ---- 本轮的 emotion / entity / schema 标签 ----
+     三个都来自这一轮真实算出来的东西，每轮重画；没有就不显示，
+     不留上一轮的残影，更不留写死的占位。
+       schema  ← /api/classify 的 slot
+       entity  ← /api/classify 的实体
+       emotion ← 右脑命中里带的【x】标记（heartnote 的内心OS 就是这个格式） */
+
+  var rbDetail = {};        // 节点 id → {slot, notes:[{text, emotion, cause}]}
+  var curEntities = [];
+  var curEmotion = '';
+  var curScene = '';
+
+  function emotionFromHits(hits) {
+    if (!hits) return '';
+    for (var i = 0; i < hits.length; i++) {
+      var text = hits[i].content || '';
+      var m = text.match(/【([^】]{1,6})】/);
+      if (m) return m[1];
+    }
+    return '';
+  }
+
+  function makeTag(kind, label, value) {
+    var el = document.createElement('span');
+    el.className = 'tag ' + kind;
+    var b = document.createElement('b');
+    b.textContent = label;
+    el.appendChild(b);
+    el.appendChild(document.createTextNode(value));
+    return el;
+  }
+
+  function renderTags() {
+    var box = document.getElementById('tags');
+    box.innerHTML = '';
+    if (curEmotion) box.appendChild(makeTag('emo', 'emotion', curEmotion));
+    if (curEntities.length > 0) box.appendChild(makeTag('ent', 'entity', curEntities[0]));
+    // "unknown" 是场景分类器说"没测出来"，不是一个场景 —— 当它没有，
+    // 退回用 slot。否则标签永远显示 unknown（麦克风里常常没有明显环境音）。
+    var scene = (curScene && curScene !== 'unknown') ? curScene : '';
+    var schema = scene || (curSlots.length > 0 ? curSlots[0] : '');
+    if (schema) box.appendChild(makeTag('sch', 'schema', schema));
+  }
+
+  function clearTags() {
+    curEntities = [];
+    curEmotion = '';
+    curScene = '';
+    renderTags();
+  }
+
+
+  /* ---- 按实体关系连线 ----
+     两条记忆挂了同一个实体（同一个人、同一门课、同一个地方）就连一条线。
+     账号主人那个实体要跳过——它几乎挂在每条记忆上，连出来是一团毛线，
+     什么信息都没有。判据：出现在超过一半记忆里的实体不算关系。 */
+
+  function linkByEntity(items) {
+    var nodeIds = [];
+    var i, j;
+    for (i = 0; i < items.length; i++) {
+      nodeIds.push(growLeft(items[i].text, items[i].slot));
+    }
+
+    // 先统计每个实体挂了几条记忆
+    var count = {};
+    for (i = 0; i < items.length; i++) {
+      var ents = items[i].entities || [];
+      for (j = 0; j < ents.length; j++) {
+        count[ents[j]] = (count[ents[j]] || 0) + 1;
+      }
+    }
+
+    var tooCommon = items.length * 0.5;
+    var byEntity = {};
+    for (i = 0; i < items.length; i++) {
+      if (nodeIds[i] === undefined) continue;      // 这条没长出节点（去重或超上限）
+      var list = items[i].entities || [];
+      for (j = 0; j < list.length; j++) {
+        var ent = list[j];
+        if (count[ent] < 2 || count[ent] > tooCommon) continue;
+        if (!byEntity[ent]) byEntity[ent] = [];
+        byEntity[ent].push(nodeIds[i]);
+      }
+    }
+
+    var linked = 0;
+    for (var ent2 in byEntity) {
+      var group = byEntity[ent2];
+      for (i = 0; i < group.length; i++) {
+        for (j = i + 1; j < group.length; j++) {
+          window.brainLink(group[i], group[j]);
+          linked = linked + 1;
+        }
+      }
+    }
+    console.log('[graph] 按实体连了', linked, '条关系线');
+  }
+
+
+  // 给脑图的悬停卡片用：这个右脑节点挂了哪些感受、每条感受为什么。
+  window.rbSlotOf = function (id) {
+    return rbDetail[id] ? rbDetail[id].slot : '';
+  };
+
+  window.rbDetailOf = function (id) {
+    var d = rbDetail[id];
+    if (!d || d.notes.length === 0) return '';
+    // 一条一行、最多两条。原来是"原话 + 换行 + ← 抽取出来的事实"，两句说同一件事，
+    // 卡片能撑到十几行还读不出重点。原话太短（"就是这首。"）就用 cause 顶上。
+    var lines = [], seen = {};
+    for (var i = 0; i < d.notes.length && lines.length < 2; i++) {
+      var n = d.notes[i];
+      var body = (n.text && n.text.replace(/\s/g, '').length >= 8) ? n.text : (n.cause || n.text);
+      if (!body) continue;
+      if (body.length > 44) body = body.slice(0, 44) + '…';
+      if (seen[body]) continue;
+      seen[body] = 1;
+      lines.push((n.emotion ? '【' + n.emotion + '】' : '') + body);
+    }
+    var more = d.notes.length - lines.length;
+    if (more > 0) lines.push('…还有 ' + more + ' 条');
+    return lines.join('\n');
+  };
+
+  function railAdd(slot, text){                // 左侧栏板对应槽的列表里也实时追加
+    const ul = document.getElementById('mem-'+slot); if(!ul) return;
+    const li = document.createElement('li'); li.textContent = text.slice(0,42); li.className='new';
+    ul.appendChild(li);
+    const cnt = document.getElementById('cnt-'+slot);
+    if(cnt) cnt.textContent = ul.querySelectorAll('li:not(.you)').length;
+  }
+  function growLeft(text, slot){
+    const key = 'L|'+text;
+    if(seen.has(key)) return seen.get(key);          // 已经长过：返回原节点，好连线
+    if(addedCount>=MAX_NODES) return undefined;
+    const id = window.brainAdd('L','entity', text, slot);
+    seen.set(key, id); addedCount++;
+    railAdd(slot, text);
+    return id;
+  }
+  //: 哪些右脑命中值得在脑图上占一个点。
+  var RB_NODE_SOURCES = { situation_pattern:1, relation:1, emotion_trait:1 };
+
+  //: 命中正文 → 节点标签。去掉日期前缀和抬头再截短。
+  function rbLabel(text){
+    var t = String(text || '')
+      .replace(/^\[\d{4}-\d{2}-\d{2}\]\s*/, '')
+      .replace(/^(情感记录|当前情绪相关的性格观察|当前信号)[：:]\s*/, '')
+      .replace(/（内心OS：[^）]*）/g, '')
+      .trim();
+    return t.length > 14 ? t.slice(0, 14) + '…' : t;
+  }
+
+  function growRight(kind, text){
+    return growRightIn(RIGHT_CLUSTER[kind] || 'experiences', text, kind);
+  }
+  // 按簇名直接放。后端已经把右脑记忆归好簇了（见 run.py 的 _rb_cluster），
+  // 前端不用再从 memory_class 猜——右脑只有 heartnote / response_experience
+  // 两个 class，猜不出 emotion / preference 的区别。
+  const KIND_OF_CLUSTER = { emotion:'emotion', preference:'prefer', experiences:'exper' };
+  function growRightIn(cluster, text, kind){
+    const key = 'R|'+text;
+    if(seen.has(key)) return seen.get(key);
+    if(addedCount>=MAX_NODES) return undefined;
+    const id = window.brainAdd('R', kind || KIND_OF_CLUSTER[cluster] || 'exper', text, cluster);
+    seen.set(key, id); addedCount++;
+    railAdd(cluster, text);
+    return id;
+  }
+  function onMemoryHits(m){
+    console.log('[voice] memory_hits  left=', (m.left_brain||[]).length,
+                'right=', (m.right_brain_hits||[]).length, 'scene=', m.current_scene);
+    if(m.related_summaries) Object.assign(window.SLOT_SUMMARIES, m.related_summaries);
+    const trunc = s => { s = String(s||''); return s.length>42 ? s.slice(0,42)+'…' : s; };
+    const left  = (m.left_brain||[]).slice(0,5).map(h=>({text:trunc(h.text), score:(h.score||0).toFixed(2),
+                                                        mid: h.has_audio ? h.memory_id : ''}));
+    const right = (m.right_brain_hits||[]).slice(0,5).map(h=>({text:trunc(h.content), score:(h.priority||0).toFixed(2)}));
+    window.vm.setRecall('l', left);
+    window.vm.setRecall('r', right);
+    // 标签：场景(schema) + 情绪 + 实体。三个都由服务端跟这一轮检索结果一起送来
+    // （见 utils.hits_payload）——以前 schema 要等另一条 /api/classify 回来，
+    // memory_hits 先到时就空着；情绪是拿正则去 content 里抠「x」，格式变了就再也抠不到。
+    if (m.slots && m.slots.length) curSlots = m.slots;
+    if (m.entities && m.entities.length) curEntities = m.entities;
+    curEmotion = m.emotion || emotionFromHits(m.right_brain_hits);
+    curScene = m.current_scene || '';
+    renderTags();
+    // 脑图生长：左脑事实 → 按 SlotV2 槽归到对应簇；右脑命中 → 右半球对应类型节点
+    const slots = curSlots.length ? curSlots : ['daily_life'];
+    var leftIds = [];
+    var rightIds = [];
+    var hitsL = (m.left_brain || []).slice(0, 4);
+    var hitsR = (m.right_brain_hits || []).slice(0, 4);
+    for (var i = 0; i < hitsL.length; i++) {
+      var id = growLeft(hitsL[i].text, slots[i % slots.length]);
+      if (id !== undefined) leftIds.push(id);
+    }
+    for (var j = 0; j < hitsR.length; j++) {
+      // profile 是整个 slot 的静态总结（快照里已用干净的实体名画过），
+      // response_experience 是给回复层看的内部笔记——这两类每轮都命中，
+      // 拿正文当标签的话右半球每轮都在堆新的长条。
+      var cluster = hitsR[j].cluster || 'experiences';
+      var rid;
+      if (RB_NODE_SOURCES[hitsR[j].source]) {
+        // 真正的"点"（情感记录 / 对某人的印象 / 性格观察）→ 自己占一个节点
+        rid = growRightIn(cluster, rbLabel(hitsR[j].content));
+      } else {
+        // profile / response_experience 是整簇的总结，不单独占点——但它确实被
+        // 检索到了，光束该射向它所属的那个簇，而不是当它没发生。
+        rid = window.brainClusterNode && window.brainClusterNode(cluster);
+      }
+      if (rid !== undefined && rightIds.indexOf(rid) < 0) rightIds.push(rid);
+    }
+    // 这一次检索的跨脑联合：一道光从左脑命中的事实射向右脑命中的画像
+    // 跨脑光束要两侧都有才画得出来；只命中一侧时至少让高亮亮起来，
+    // 别让整个可视化一起消失。
+    // 每一轮都用**这一轮真实的命中**：左脑取到哪几条事实，右脑触发了哪几个情绪/
+    // 画像节点，光束就从这几个点射向那几个点。不是写死的动画。
+    console.log('[graph] 跨脑光束', leftIds.length, '→', rightIds.length);
+    if (window.brainBeam) window.brainBeam(leftIds, rightIds);
+    // 这一轮取到的点，外圈亮起来
+    if (window.brainHighlight) {
+      window.brainHighlight(leftIds.concat(rightIds));
+    }
+  }
+
+  // ---- playback（复用 orb.html 机制）----
+  // 浏览器只允许在用户手势里启动 AudioContext。之前是等第一块音频到了才 new，
+  // 那时候早不在点击上下文里了，创建出来是 suspended 状态——不报错、也没声音。
+  // answer_start 里那句 resume() 也救不回来：那会儿 playCtx 还是 null。
+  function ensurePlayback(){
+    if(!playCtx) playCtx = new (window.AudioContext||window.webkitAudioContext)();
+    if(playCtx.state === 'suspended') playCtx.resume();
+    return playCtx;
+  }
+
+  function playPcm(buf){
+    ensurePlayback();
+    if(playCtx.state === 'suspended'){
+      console.warn('[audio] AudioContext 被浏览器挂起，点一下页面再试');
+    }
+    // PCM16 一个样本 2 字节；奇数长度的 buffer 直接 new Int16Array 会抛 RangeError，
+    // 外面那个 catch 一吞就是整块音频没了。服务端已按样本边界切好，这里再兜一道。
+    if(buf.byteLength & 1) buf = buf.slice(0, buf.byteLength - 1);
+    if(!buf.byteLength) return;
+    const i16=new Int16Array(buf), f32=new Float32Array(i16.length);
+    for(let i=0;i<i16.length;i++) f32[i]=i16[i]/32768;
+    const b=playCtx.createBuffer(1,f32.length,SAMPLE_RATE); b.copyToChannel(f32,0);
+    const s=playCtx.createBufferSource(); s.buffer=b; s.connect(playCtx.destination);
+    scheduled.push(s); s.onended=()=>{const i=scheduled.indexOf(s); if(i>=0)scheduled.splice(i,1);};
+    const now=playCtx.currentTime, at=nextPlay>now?nextPlay:now+PREBUFFER; s.start(at); nextPlay=at+b.duration;
+  }
+  function stopPlayback(){ for(const s of scheduled.splice(0)){try{s.stop();}catch(e){}} if(playCtx) nextPlay=playCtx.currentTime; }
+
+  // 一轮的回复只进 chat 一次。answer_done 和 answer_interrupt **都可能到**：
+  // realtime 推音频比播放快，一段十几秒的回复两三秒就推完了，response.done
+  // 先来（记一次），人再插话时前端还在播剩下的（又记一次）——chat 里就出现两遍。
+  function logTurnOnce(){
+    if(turnLogged) return;
+    turnLogged = true;
+    addTurn('ai', replyText);
+  }
+
+  function handle(msg){
+    console.log('[voice] <<', msg.type, msg.text!==undefined?JSON.stringify(msg.text).slice(0,40):'');
+    switch(msg.type){
+      case 'session_ready': PREBUFFER = msg.mode === 'realtime' ? 0.08 : 0.25; break;
+      case 'speech_tentative': setVoiceState('user'); if(playCtx&&playCtx.state==='running')playCtx.suspend(); break;
+      case 'partial_transcript': stopClip(); setVoiceState('user'); window.vm.setInput(msg.replace? msg.text : ($('liveInput').textContent.replace('…','')+msg.text)); break;
+      case 'user_transcript':
+        stopClip();
+        window.vm.setInput(msg.text);
+        addTurn('user', msg.text);
+        // 分类本轮文本 → SlotV2 槽（左脑生长据此归槽）；同源 :8000 调 facade
+        fetch('/api/classify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:msg.text})})
+          .then(function(r){ return r.json(); })
+          .then(function(d){
+            curSlots = (d.slots && d.slots.length) ? d.slots : [];
+            curEntities = (d.entities && d.entities.length) ? d.entities : [];
+            renderTags();
+          })
+          .catch(function(){});
+        break;
+      case 'memory_hits': onMemoryHits(msg); break;
+      case 'play_memory': pendingClip = msg.memory_id; break;   // 先记着，等回复播完再放
+      case 'answer_start': stopClip(); setVoiceState('ai'); replyText=''; turnLogged=false; $('reply').textContent=''; ensurePlayback(); break;
+      case 'answer_delta': replyText+=msg.text; $('reply').textContent=replyText; break;
+      case 'answer_done':
+        logTurnOnce();
+        playClipWhenQuiet();
+        setTimeout(function(){ setVoiceState('idle'); }, 400);
+        break;
+      case 'answer_resume': if(playCtx&&playCtx.state==='suspended')playCtx.resume(); break;
+      case 'answer_interrupt':
+        stopPlayback();
+        stopClip();
+        pendingClip = null;            // 他都插话了，别再自顾自放那段录音
+        logTurnOnce();                 // 被打断：存他真正听到的那半句
+        break;
+      case 'error': console.warn('[backend]', msg.message); $('reply').textContent='⚠ 后端错误：'+msg.message; setVoiceState('idle'); break;
+    }
+  }
+
+  // ---- mic（复用 orb.html 机制）----
+  function downsample(f32,from,to){ if(from===to)return f32; const r=from/to,n=Math.round(f32.length/r),o=new Float32Array(n);
+    for(let i=0;i<n;i++){const s=i*r,a=Math.floor(s),b=Math.min(a+1,f32.length-1),fr=s-a; o[i]=f32[a]*(1-fr)+f32[b]*fr;} return o; }
+  function toPCM16(f32){ const o=new Int16Array(f32.length); for(let i=0;i<f32.length;i++){const s=Math.max(-1,Math.min(1,f32[i])); o[i]=s<0?s*0x8000:s*0x7fff;} return o; }
+  // ---- 流线动效（侧栏左上角）----
+  // 三束正弦叠加出的封闭曲线，每束由多条细线并排组成，形成织网质感。
+  // 常驻运行：没有音频输入时只做缓慢呼吸；一说话就按电平放大形变与转速。
+  // 分析节点复用 startMic 建好的 micCtx —— 一个 source 可以同时连多个节点，
+  // 为可视化再开一个 AudioContext 等于多一份音频线程开销。
+  const ORB = {
+    strands: 3, linesPerStrand: 7, points: 96, spacingFrac: 0.06,
+    baseRadius: 0.34,                  // 静音时的半径（画布短边的比例）
+    shrink: 0.45,                      // 电平越高基础半径收得越小——丝带向外张开，
+                                       // 圆心那圈跟着收进来，峰值才不会顶出画布
+    idleAmp: 0.14, liveAmp: 1.05,      // 形变幅度：静音时留一点花瓣（起伏 14%），不然转起来看不出来
+    idleSpeed: 0.10, liveSpeed: 0.55,
+    rotSpeed: 0.50, liveRotSpeed: 1.30, // 整体自转：静音约 12s 一圈，说话时提到约 5s 一圈
+    strandRotSpread: 0.30,             // 三束差速，外束转得比内束快，织网才有层次
+    lineWidth: 1.1,
+    liveSquish: 0.88,                  // 满电平时的纵向压扁；静音恒为 1（正圆）
+    haloBlur: 5, haloAlpha: 0.38, midBlur: 2, midAlpha: 0.46,
+    dark: [45, 115, 245], light: [170, 235, 255],   // 内圈鲜蓝 → 外圈亮青
+  };
+  let orbAnalyser=null, orbLevel=0, orbPhase=0, orbRot=0;
+  const orbData=new Uint8Array(128);
+  const orbGlow=document.createElement('canvas');
+
+  function orbPoint(theta, t, si, R, amp, squish){
+    const ph=(si/ORB.strands)*Math.PI*2;
+    const r=R*(1 + amp*(0.40*Math.sin(3*theta+ph+t*1.0)
+                      + 0.24*Math.sin(5*theta-ph*2+t*0.6)
+                      + 0.16*Math.sin(2*theta+ph*1.5-t*1.4)));
+    const wob=0.09*R*amp*Math.sin(4*theta-t*1.8+ph);
+    return { x: r*Math.cos(theta) + wob*Math.cos(theta+Math.PI/2),
+             y: r*Math.sin(theta)*squish + wob*Math.sin(theta+Math.PI/2) };
+  }
+
+  function startOrb(){
+    const cvs=$('orb'), c=cvs.getContext('2d');
+    const W=cvs.width, H=cvs.height;
+    orbGlow.width=W; orbGlow.height=H;
+    const g=orbGlow.getContext('2d');
+    let last=performance.now();
+
+    let acc=0;
+    (function frame(now){
+      requestAnimationFrame(frame);
+      const dt=Math.min((now-last)/1000, 0.1); last=now;
+      // 静音时降到 ~20fps。这个动效常驻在跑，满帧画 3×7×97 条线段再叠三层模糊会
+      // 抢主线程——音频是在主线程上排期的，卡了就表现为"回复变慢"。
+      // 说话时（orbLevel 高）恢复满帧，那才是需要看清起伏的时候。
+      acc += dt;
+      if(orbLevel < 0.03 && acc < 0.05) return;
+      acc = 0;
+
+      // 电平：起音快、回落慢，免得一停顿图形就塌下去
+      let lvl=0;
+      if(orbAnalyser){
+        orbAnalyser.getByteFrequencyData(orbData);
+        let sum=0; for(let i=0;i<orbData.length;i++) sum+=orbData[i];
+        lvl=Math.min(1, (sum/orbData.length/255)*2.6);
+      }
+      orbLevel += (lvl-orbLevel) * (lvl>orbLevel ? 0.35 : 0.06);
+
+      const amp=ORB.idleAmp + (ORB.liveAmp-ORB.idleAmp)*orbLevel;
+      const squish=1 - (1-ORB.liveSquish)*orbLevel;   // 静音正圆，说话时略压扁成花瓣
+      orbPhase += dt*(ORB.idleSpeed + (ORB.liveSpeed-ORB.idleSpeed)*orbLevel);
+      // 按 dt 积分而不是用 now 直接算角度：转速随电平变化，直接乘会在电平跳变时闪一下
+      orbRot += dt*(ORB.rotSpeed + (ORB.liveRotSpeed-ORB.rotSpeed)*orbLevel);
+      const rot=orbRot;
+      const R=Math.min(W,H)*ORB.baseRadius*(1-ORB.shrink*orbLevel);
+
+      // ① 线条画到离屏画布（清晰、不带模糊）
+      g.clearRect(0,0,W,H); g.save(); g.translate(W/2,H/2); g.rotate(rot);
+      const grad=g.createRadialGradient(0,0,0,0,0,R*2.1);
+      grad.addColorStop(0,   `rgba(${ORB.dark},1)`);
+      grad.addColorStop(0.55,`rgba(${ORB.dark},1)`);
+      grad.addColorStop(1,   `rgba(${ORB.light},1)`);
+      const M=ORB.linesPerStrand, half=(M-1)/2, spacing=R*ORB.spacingFrac;
+      g.strokeStyle=grad; g.lineWidth=ORB.lineWidth; g.lineJoin='round'; g.lineCap='round';
+      for(let si=0; si<ORB.strands; si++){
+        const spin=rot*ORB.strandRotSpread*si;   // 每束再叠一点自己的转速
+        const cs=Math.cos(spin), sn=Math.sin(spin);
+        for(let k=0;k<M;k++){
+          const Rk=R+(k-half)*spacing;
+          const edge=1-Math.abs(k-half)/(half+0.001);   // 束心亮、边缘透
+          g.beginPath();
+          for(let i=0;i<=ORB.points;i++){
+            const th=(i/ORB.points)*Math.PI*2;
+            const pt=orbPoint(th, orbPhase, si, Rk, amp, squish);
+            const x=pt.x*cs-pt.y*sn, y=pt.x*sn+pt.y*cs;
+            i===0 ? g.moveTo(x,y) : g.lineTo(x,y);
+          }
+          g.globalAlpha=0.50+0.50*edge; g.stroke();
+        }
+      }
+      g.globalAlpha=1; g.restore();
+
+      // ② 主画布：底色 + 中心辉光（亮度也跟电平走）
+      c.clearRect(0,0,W,H);
+      c.save(); c.translate(W/2,H/2);
+      const bg=c.createRadialGradient(0,0,0,0,0,R*2.1);
+      bg.addColorStop(0,   `rgba(60,130,255,${0.26+0.30*orbLevel})`);
+      bg.addColorStop(0.5, `rgba(30,70,190,${0.12+0.14*orbLevel})`);
+      bg.addColorStop(1,   'rgba(0,0,0,0)');
+      c.fillStyle=bg; c.beginPath(); c.arc(0,0,R*2.1,0,Math.PI*2); c.fill();
+      c.restore();
+
+      // ③ 叠加辉光：柔光 → 中间光 → 清晰线条。
+      // 用 canvas 的 filter:blur 而不是逐段 shadowBlur——后者每条线都要重算模糊，帧率扛不住。
+      c.save(); c.globalCompositeOperation='lighter';
+      c.filter=`blur(${ORB.haloBlur}px)`; c.globalAlpha=ORB.haloAlpha; c.drawImage(orbGlow,0,0);
+      c.filter=`blur(${ORB.midBlur}px)`;  c.globalAlpha=ORB.midAlpha;  c.drawImage(orbGlow,0,0);
+      c.filter='none'; c.globalAlpha=1;   c.drawImage(orbGlow,0,0);
+      c.restore();
+    })(last);
+  }
+
+  function attachOrb(src){                     // 麦克风开了：接上分析节点
+    if(!micCtx) return;
+    orbAnalyser=micCtx.createAnalyser(); orbAnalyser.fftSize=256;
+    src.connect(orbAnalyser);                  // 只分析，不接 destination，不会出声
+    $('orb').classList.add('on');
+  }
+  function stopOrb(){                          // 麦克风关了：断开，图形自己衰减回静态
+    if(orbAnalyser){ try{orbAnalyser.disconnect();}catch(e){} orbAnalyser=null; }
+    $('orb').classList.remove('on');
+  }
+
+  async function startMic(){
+    micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+    if(!micCtx) micCtx=new (window.AudioContext||window.webkitAudioContext)();
+    const src=micCtx.createMediaStreamSource(micStream); micProc=micCtx.createScriptProcessor(4096,1,1);
+    const g=micCtx.createGain(); g.gain.value=0;
+    micProc.onaudioprocess=e=>{ if(!recording||!ws||ws.readyState!==WebSocket.OPEN)return;
+      ws.send(toPCM16(downsample(e.inputBuffer.getChannelData(0), micCtx.sampleRate, SAMPLE_RATE)).buffer); };
+    src.connect(micProc); micProc.connect(g); g.connect(micCtx.destination);
+    attachOrb(src);
+  }
+  function stopMic(){ stopOrb(); if(micProc){micProc.disconnect();micProc=null;} if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null;} }
+
+  // 打开 WS（文字轮和语音轮共用一条），返回 Promise，open 后 resolve
+  function openWS(){
+    return new Promise((resolve, reject)=>{
+      if(ws && ws.readyState<=1){ ws.readyState===1 ? resolve() : ws.addEventListener('open',()=>resolve(),{once:true}); return; }
+      $('voiceLab').textContent = '连接中… ' + WS_HOST;
+      console.log('[voice] connecting', WS_URL);
+      let opened=false;
+      try{ ws=new WebSocket(WS_URL); }catch(e){ $('voiceLab').textContent='WS 地址无效'; return reject(e); }
+      ws.binaryType='arraybuffer';
+      ws.onopen =()=>{ opened=true; $('voiceLab').textContent='已连接'; console.log('[voice] ws open'); resolve(); };
+      ws.onclose=ev=>{
+        console.log('[voice] ws closed  code=', ev.code, 'reason=', JSON.stringify(ev.reason), 'wasClean=', ev.wasClean);
+        recording=false; talkBtn.textContent='开始对话'; talkBtn.classList.remove('live'); setVoiceState('idle'); ws=null;
+        if(!opened) $('voiceLab').textContent = (ev.code===1006? '连不上 '+WS_HOST+'（:8787 没在跑/端口不对）' : '连接被关 code='+ev.code);
+        else $('voiceLab').textContent = '连接已关闭 code='+ev.code+(ev.reason?(' · '+ev.reason):'');
+        reject(new Error('ws closed '+ev.code));
+      };
+      ws.onerror=()=>{ console.warn('[voice] ws error'); };
+      ws.onmessage=ev=>{ if(ev.data instanceof ArrayBuffer){ try{playPcm(ev.data);}catch(e){console.warn('[audio] 丢帧',e);} return; } handle(JSON.parse(ev.data)); };
+    });
+  }
+
+  async function start(){                       // 语音：麦克风 + WS
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      $('voiceLab').textContent = '请用 http://localhost:8000 打开（不能直接双击 html）'; return;
+    }
+    ensurePlayback();          // 必须在这个点击里建 AudioContext，见函数注释
+    try{ await startMic(); }catch(e){ $('voiceLab').textContent='麦克风被拒绝/不可用'; console.warn(e); return; }
+    try{ await openWS(); }catch(e){ stopMic(); return; }
+    recording=true; talkBtn.textContent='结束对话'; talkBtn.classList.add('live'); setVoiceState('user');
+  }
+  function stop(){ recording=false; stopMic(); stopPlayback(); if(ws){ws.close();ws=null;} talkBtn.textContent='开始对话'; talkBtn.classList.remove('live'); setVoiceState('idle'); }
+  talkBtn.addEventListener('click', ()=>{ try{ recording? stop() : start(); }catch(e){ console.error(e); $('voiceLab').textContent='出错: '+e.message; } });
+
+  // 文字轮：打字回车 → 走后端 {type:user_text}，完全绕过 ASR（只需 OpenAI）
+  const textIn = $('textIn');
+  textIn.addEventListener('keydown', async e=>{
+    if(e.key!=='Enter') return;
+    const t = textIn.value.trim(); if(!t) return;
+    textIn.value=''; window.vm.setInput(t); curSlots=[];
+    try{ await openWS(); }catch(err){ return; }
+    ws.send(JSON.stringify({type:'user_text', text:t}));
+  });
+
+
+  // 服务端判断这一轮问的是"一段声音"时（见 run.py 的 _replay_id），等助手说完
+  // 就把当时那段原声放出来 —— 不用他自己去点卡片上的 ▶。
+  // 必须等：回复是排队播的（nextPlay 是队尾时间），提前放就跟人声叠在一起了。
+  // 走**放回复的那个 AudioContext**，不要用 new Audio()。
+  // 用 <audio> 元素时：play() 是在 setTimeout 里调的，脱离了用户手势，Chrome 的
+  // 自动播放策略直接拒绝——但元素照样会去 fetch，服务端日志上是一条漂亮的
+  // 206，听感却是一点声音都没有，报错只躺在浏览器 console 里。
+  // playCtx 是在"开始对话"那个点击手势里建的，往它上面排 buffer 不受任何限制，
+  // 而且能直接接在回复的队尾（nextPlay）后面，不用再猜要等多久。
+  async function playClipWhenQuiet(){
+    const mid = pendingClip; pendingClip = null;
+    if(!mid) return;
+    try{
+      const ctx = ensurePlayback();
+      const raw = await fetch('/api/audio/' + mid).then(r => r.arrayBuffer());
+      const buf = await ctx.decodeAudioData(raw);
+      const src = ctx.createBufferSource();
+      src.buffer = buf; src.connect(ctx.destination);
+      const at = Math.max(ctx.currentTime + 0.05, nextPlay);   // 接在回复播完之后
+      src.start(at); nextPlay = at + buf.duration;
+      scheduled.push(src);                                     // 被打断时一起停掉
+      clipSrc = src;
+      src.onended = function(){
+        if(clipSrc === src) clipSrc = null;
+        const i = scheduled.indexOf(src); if(i>=0) scheduled.splice(i,1);
+      };
+      console.log('[audio] 原声回放', mid, buf.duration.toFixed(1)+'s @', at.toFixed(2));
+    }catch(err){ console.warn('[audio] 原声回放失败', err); }
+  }
+
+  // 掐掉正在放的那段原声。
+  //
+  // 服务端这时候帮不上忙：原声是接在回复**播完之后**才开始放的，那会儿
+  // response.done 早就到了、hearing() 为假，你插话根本不会触发 answer_interrupt。
+  // 但前端自己知道你开口了（partial_transcript 一直在来），直接掐就行。
+  // 还要把 nextPlay 收回来——排那 15 秒时它被推到了 15 秒之后，不收回来的话
+  // 下一轮回复的音频只能排在原声后面，听感就是"等它放完才肯回话"。
+  function stopClip(){
+    if(!clipSrc) return;
+    try{ clipSrc.stop(); }catch(e){}
+    const i = scheduled.indexOf(clipSrc); if(i>=0) scheduled.splice(i,1);
+    clipSrc = null;
+    if(playCtx) nextPlay = playCtx.currentTime;
+  }
+
+  // 记忆卡片上的 ▶：把这条记忆当时那段原声放回来（GET /api/audio/{memory_id}）。
+  // 事件委托绑在容器上——卡片每轮都重绘，绑在按钮上会随着重绘失效。
+  let memAudio = null;
+  document.addEventListener('click', e=>{
+    const b = e.target.closest('.play[data-mid]'); if(!b) return;
+    if(memAudio){ memAudio.pause(); memAudio = null; }
+    stopPlayback();                       // 先把助手正在说的掐掉，别叠在一起
+    memAudio = new Audio('/api/audio/' + b.dataset.mid);
+    b.textContent = '⏸';
+    memAudio.onended = memAudio.onerror = ()=>{ b.textContent = '▶'; memAudio = null; };
+    memAudio.play().catch(err=>{ console.warn('[audio] 播放失败', err); b.textContent='▶'; });
+  });
+
+
+  /* ================= session：一次对话一条，像 Claude 的 sidebar =================
+     全部放在浏览器内存里，不动后端。每条 session 记一来一回的原文；
+     标题就取这一轮用户说的第一句话——不额外调模型去总结。 */
+
+  var sessions = [];          // [{id, title, turns:[{role:'user'|'ai', text}]}]
+  var currentId = 0;
+  var nextId = 1;
+
+  function newSession() {
+    var s = { id: nextId, title: '新对话', turns: [], named: false };
+    nextId = nextId + 1;
+    sessions.unshift(s);      // 新的排最前
+    currentId = s.id;
+    renderSessions();
+    renderChat();
+    return s;
+  }
+
+  function findSession(id) {
+    for (var i = 0; i < sessions.length; i++) {
+      if (sessions[i].id === id) return sessions[i];
+    }
+    return null;
+  }
+
+  function currentSession() {
+    var s = findSession(currentId);
+    if (s === null) s = newSession();
+    return s;
+  }
+
+  function addTurn(role, text) {
+    if (!text) return;
+    var s = currentSession();
+    s.turns.push({ role: role, text: text });
+    // 先用用户说的第一句顶着，助手答完再换成概括出来的标题
+    if (!s.namedAt && role === 'user') {
+      s.title = text.length > 20 ? text.slice(0, 20) + '…' : text;
+    }
+    if (role === 'ai' && shouldRename(s)) nameSession(s);
+    renderSessions();
+    renderChat();
+  }
+
+  //: 攒到这些轮数时（重新）起一次标题。
+  //  只在第一轮问答之后命名一次是 ChatGPT 的做法，但它假设开场就切入正题；
+  //  实际开场常是"喂喂喂测试一下"，标题就永远卡在那儿。所以对话长起来之后
+  //  再重命名——第 8 轮的时候，这段聊的是什么已经清楚了。
+  var RENAME_AT = [2, 8, 20];
+
+  function shouldRename(s) {
+    var n = s.turns.length;
+    var last = s.namedAt || 0;
+    for (var i = 0; i < RENAME_AT.length; i++) {
+      if (n >= RENAME_AT[i] && last < RENAME_AT[i]) {
+        // 开场全是"喂""测试"这种时先别浪费一次调用，等下一个档位
+        var chars = 0;
+        for (var j = 0; j < s.turns.length; j++) {
+          if (s.turns[j].role === 'user') chars += s.turns[j].text.length;
+        }
+        return chars >= 8;
+      }
+    }
+    return false;
+  }
+
+  // 让模型用一句话概括这段对话，当 sidebar 的标题。
+  // 异步的——标题晚一秒出来无所谓，不能挡着对话。
+  async function nameSession(s) {
+    s.namedAt = s.turns.length;           // 记下在第几轮命名的，别同一档位重复叫
+    var lines = [];
+    for (var i = 0; i < s.turns.length; i++) {
+      var who = s.turns[i].role === 'user' ? '用户' : '助手';
+      lines.push(who + '：' + s.turns[i].text);
+    }
+    try {
+      var res = await fetch('/api/title', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: lines.join('\n') })
+      });
+      var data = await res.json();
+      if (data.title) {
+        s.title = data.title;
+        renderSessions();
+      }
+    } catch (err) {
+      console.warn('[title] 生成失败，沿用第一句', err);
+    }
+  }
+
+  function selectSession(id) {
+    currentId = id;
+    renderSessions();
+    renderChat();
+  }
+
+  function renderSessions() {
+    var ul = document.getElementById('sessList');
+    ul.innerHTML = '';
+    for (var i = 0; i < sessions.length; i++) {
+      var s = sessions[i];
+      var li = document.createElement('li');
+      if (s.id === currentId) li.className = 'on';
+      var t = document.createElement('span');
+      t.className = 't';
+      t.textContent = s.title;
+      var n = document.createElement('span');
+      n.className = 'n';
+      n.textContent = s.turns.length + ' 轮';
+      li.appendChild(t);
+      li.appendChild(n);
+      li.dataset.id = s.id;
+      ul.appendChild(li);
+    }
+  }
+
+  function renderChat() {
+    var box = document.getElementById('chatLog');
+    var s = findSession(currentId);
+    box.innerHTML = '';
+    if (s === null || s.turns.length === 0) {
+      var e = document.createElement('div');
+      e.className = 'empty';
+      e.textContent = '还没有对话。说点什么，或在左边打字。';
+      box.appendChild(e);
+      return;
+    }
+    for (var i = 0; i < s.turns.length; i++) {
+      var turn = s.turns[i];
+      var wrap = document.createElement('div');
+      wrap.className = turn.role === 'user' ? 'turn user' : 'turn ai';
+      var who = document.createElement('div');
+      who.className = 'who';
+      who.textContent = turn.role === 'user' ? '你' : 'VoiceMem';
+      var said = document.createElement('div');
+      said.className = 'said';
+      said.textContent = turn.text;
+      wrap.appendChild(who);
+      wrap.appendChild(said);
+      box.appendChild(wrap);
+    }
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function onSessionListClick(e) {
+    var li = e.target.closest('li[data-id]');
+    if (!li) return;
+    selectSession(Number(li.dataset.id));
+  }
+
+  document.getElementById('sessList').addEventListener('click', onSessionListClick);
+  document.getElementById('newSess').addEventListener('click', newSession);
+
+
+  /* ---- 一键下载记忆 ----
+     直接拿 /api/memories 那份快照（打开页面铺脑图用的就是它），存成 json。
+     文件名用输入框里的，留空就用默认的。 */
+
+  function safeFileName(name) {
+    var n = name.trim();
+    if (n === '') n = 'voicemem-memories';
+    n = n.replace(/[\\/:*?"<>|]/g, '-');      // 这些字符在文件名里不合法
+    if (n.slice(-5) !== '.json') n = n + '.json';
+    return n;
+  }
+
+  function saveTextAsFile(text, fileName) {
+    var blob = new Blob([text], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  async function downloadMemories() {
+    var btn = document.getElementById('dlBtn');
+    var old = btn.textContent;
+    btn.textContent = '导出中…';
+    try {
+      var res = await fetch('/api/memories');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var data = await res.json();
+      var out = {
+        exported_at: new Date().toISOString(),
+        left_brain: data.left || [],
+        right_brain: data.right || []
+      };
+      var name = safeFileName(document.getElementById('dlName').value);
+      saveTextAsFile(JSON.stringify(out, null, 2), name);
+      btn.textContent = '已下载';
+    } catch (err) {
+      console.warn('[download] 失败', err);
+      btn.textContent = '下载失败';
+    }
+    setTimeout(function () { btn.textContent = old; }, 1600);
+  }
+
+  document.getElementById('dlBtn').addEventListener('click', downloadMemories);
+
+  /* ---- 右板块：Chat / Memory Space 切换 ---- */
+  function showChat() {
+    document.getElementById('viewChat').classList.remove('hide');
+    document.getElementById('viewMem').classList.add('hide');
+    document.getElementById('tabChat').classList.add('on');
+    document.getElementById('tabMem').classList.remove('on');
+  }
+
+  function showMemory() {
+    document.getElementById('viewChat').classList.add('hide');
+    document.getElementById('viewMem').classList.remove('hide');
+    document.getElementById('tabChat').classList.remove('on');
+    document.getElementById('tabMem').classList.add('on');
+    // 脑图是按容器尺寸画的，隐藏时算出来的是 0；显示后重算一次。
+    if (window.brainResize) window.brainResize();
+  }
+
+  document.getElementById('tabChat').addEventListener('click', showChat);
+  document.getElementById('tabMem').addEventListener('click', showMemory);
+
+  newSession();
+
+  startOrb();          // 流线常驻：没接麦克风时按 idleAmp 缓慢呼吸
+
+  // 打开页面先把库里已有的记忆铺成节点——不然一进来是张空图，看不出"它记得我"。
+  // 之后说话新增的节点走 onMemoryHits 那条路，两边共用 seen 去重，不会重复长。
+  //
+  // ?fresh=1 —— 新访客模式：跳过这一步，脑图从**空的**开始，节点随着他自己说话
+  // 一个个长出来。给别人试用时用这个链接：他看到的是"记忆从零建立"的过程，而不是
+  // 一屏别人的记忆。其余一切（左栏、连线、关系、检索射线、配色动效）完全一样。
+  const FRESH = params.get('fresh') === '1';
+  (async ()=>{
+    if(FRESH){ console.log('[graph] 新访客模式：脑图从空开始'); return; }
+    try{
+      const r = await fetch('/api/memories');
+      if(!r.ok) return;
+      const m = await r.json();
+      linkByEntity(m.left || []);
+      // 右脑铺的是 slot→entity 那一层的 entity（"委屈""讨厌坚果和过敏"），
+      // 挂在下面的 heartnote 存起来，点开节点时显示"感受 + 为什么"。
+      for (var k = 0; k < (m.right || []).length; k++) {
+        var item = m.right[k];
+        var nid = growRightIn(item.cluster || 'experiences', item.text);
+        if (nid !== undefined) {
+          rbDetail[nid] = { slot: item.slot, notes: item.notes || [] };
+        }
+      }
+      console.log('[seed] 已有记忆 left=',(m.left||[]).length,'right=',(m.right||[]).length);
+    }catch(e){ console.warn('[seed] 读取已有记忆失败', e); }
+  })();
+})();
+</script>
+</body>
+</html>

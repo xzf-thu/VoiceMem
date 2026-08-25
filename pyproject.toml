@@ -1,0 +1,81 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voicemem"
+version = "0.2.1"
+description = "Left-brain/right-brain memory framework with an audio-native perception layer (scene/speaker/emotion)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Lang Jiaqi" }]
+keywords = ["memory", "voice", "agent", "llm", "speech", "rag"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+
+# `pip install voicemem` 一条命令装齐所有内置组件：ASR、VAD、声纹、场景、情绪、
+# 本地 embedding，外加 web demo 和 examples/ 的运行依赖。
+#
+# 之前把这些拆在 [slm] extra 里，用户按 README 装完基础包仍然
+# ModuleNotFoundError: funasr —— 名字叫 slm，没人想得到 ASR 在里面。
+dependencies = [
+    "numpy",
+    "openai",
+    "mem0ai",
+    # ── 音频链路 ──
+    "torch",
+    "torchaudio",         # funasr 内部 import 它，但自己没声明
+    "torchvision",        # transformers 加载 Qwen2.5-Omni 要 Qwen2VLVideoProcessor，
+                          # 它 import torchvision。缺了不报错，只是情绪归因器**静默**
+                          # 退回纯声学象限——"我喜欢草莓"会判成悲伤，右脑整个不准。
+    "transformers==4.52.3",
+    "accelerate",         # 情绪归因 from_pretrained(device_map="auto") 要它，
+                          # 缺了同样是静默退化，不是报错。
+    "funasr",             # 流式 ASR（默认）
+    "modelscope",         # funasr 取模型用
+    "sherpa-onnx",        # VAD + 声纹 + 回退 ASR（纯 onnx）
+    "sentence-transformers",   # 本地 E5（记忆向量 / slot 分类）
+    "soundfile",          # 读 mp3/m4a/flac；缺了会退回标准库 wave，只认 PCM wav
+    "scipy",
+    # ── web demo（web/run.py）和 examples/ ──
+    "fastapi",
+    "uvicorn",
+    "pydantic",           # web/utils.py 顶层就 import 了（fastapi 带得进来，但别靠它）
+    "websockets>=14",     # uvicorn 跑 WebSocket；examples/05 接 realtime 也用
+    "sounddevice",        # examples 里的语音 agent：麦克风 + 扬声器
+    "pywebrtc-audio",     # 回声消除（外放时能打断）
+]
+
+[project.optional-dependencies]
+# 跑我们微调的 Qwen 回复模型（Qwen3.6-35B-A3B + QLoRA adapter）。
+# 权重不在 wheel 里，用 `bash scripts/download_models.sh --reply-adapter` 拉。
+slm = [
+    "peft",               # 加载 QLoRA adapter
+    "qwen-omni-utils",    # Qwen-Omni 的多模态输入预处理
+    "audioread",          # qwen-omni-utils 顶层就 import 它，但自己没声明；
+                          # 缺了 `import qwen_omni_utils` 直接 ModuleNotFoundError。
+]
+
+# 只有这两条命令。其余场景各自 pip，不再单开 extra——名字对不上内容的 extra
+# 正是之前那个坑的成因（[slm] 里装着 ASR，谁也想不到）：
+#   本地 TTS（TTS_BACKEND=local）  pip install piper-tts   或   pip install voxcpm
+#   跑 finetune/ 的训练脚本         pip install ms-swift==4.5.2 bitsandbytes
+
+[project.urls]
+Homepage = "https://github.com/lang-jiaqi/Voicemem_open"
+Repository = "https://github.com/lang-jiaqi/Voicemem_open"
+Issues = "https://github.com/lang-jiaqi/Voicemem_open/issues"
+
+[tool.setuptools.packages.find]
+include = ["voicemem*"]
+
+# data/ 下的 prompt 文本是运行时读的（见 leftbrain/mem0_additive_prompt_build.py），
+# 不显式声明的话 wheel 里不会有，装完一调用就 FileNotFoundError。
+[tool.setuptools.package-data]
+"*" = ["data/*.txt", "*.txt"]

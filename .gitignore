@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+# 本地草稿测试不进仓库，但按 README 两节写的那两个装包自检要进
+tests/*
+!tests/test_offline_engine.py
+!tests/test_streaming.py
+
+# 运行时数据：记忆库、评测结果、录音归档
+results/
+memory/
+out/
+
+# 环境与本地配置
+.env
+.venv/
+.claude/
+.DS_Store
+
+# 模型权重：由 scripts/download_models.sh 拉取，不进仓库
+*.onnx
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+*.bin
+# 按用途分的模型目录（连同 tokens.txt / test_wavs 这些随包资产一起）；
+# models/ 下的内容全部由 scripts/download_models.sh 拉取，不进仓库
+models/vad/
+models/asr/
+models/speaker/
+models/embedding/
+models/scene/
+models/emotion/
+models/tts/
+models/slm/
+models/reply_adapter/
+
+# 本地演示分叉与个人种子脚本
+demo_local/
+scripts/seed_*.py
+
+# Electron 桌面壳
+node_modules/
+
+# 默认记忆根目录（不传 memory_root 时落在当前目录）
+voicemem_memory/
+examples/example_memory/
+voicemem_memoryspace/
