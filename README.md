@@ -29,7 +29,7 @@
 </p>
 
 <p align="center">
-  <img src="wechat.jpg" alt="VoiceMem 微信群" width="60%">
+  <img src="assets/wechat.jpg" alt="VoiceMem 微信群" width="60%">
 </p>
 
 ---
@@ -226,14 +226,14 @@ http://localhost:8787
 VoiceMem 不把所有记忆放进同一个检索数据库，而是将记忆拆分成两个互相配合的部分：
 
 <p align="center">
-  <img src="./docs/images/fig-architecture.webp" alt="VoiceMem 系统架构" width="80%">
+  <img src="docs/images/fig-architecture.webp" alt="VoiceMem 系统架构" width="80%">
 </p>
 
 * **左脑**通过 Schema 和 Entity 组织事实记忆，用于更加准确地检索信息。
 * **右脑**通过独立节点和跨实体节点管理人格、情绪和关系信息。
 
 <p align="center">
-  <img src="./docs/images/stages.webp" alt="VoiceMem 处理流程" width="90%">
+  <img src="docs/images/stages.webp" alt="VoiceMem 处理流程" width="90%">
 </p>
 
 整个流程都是**流式**的。
@@ -265,7 +265,7 @@ VoiceMem 不把所有记忆放进同一个检索数据库，而是将记忆拆�
 VoiceMem 家族开源模型包括 **Qwen2.5-Omni、Qwen3-Omni 和 Step-Audio2-Mini**。这些模型可以在对话时接受并理解 VoiceMem 提供的记忆信息。
 
 <p align="center">
-  <img src="./docs/images/fig-opd.webp" alt="VoiceMem OPD 流程" width="90%">
+  <img src="docs/images/fig-opd.webp" alt="VoiceMem OPD 流程" width="90%">
 </p>
 
 ## 🔌 使用 VoiceMem 定制你的语音智能体
@@ -314,7 +314,7 @@ python finetune/train.py --data data/train.jsonl
 评测流程完全开源，并且可以复现。
 
 <p align="center">
-  <img src="./assets/evaluation.webp" alt="VoiceMem 评测结果" width="100%">
+  <img src="assets/evaluation.webp" alt="VoiceMem 评测结果" width="100%">
 </p>
 
 ### 运行评测
@@ -423,7 +423,7 @@ VoiceMem 基于 **Apache License 2.0** 开源。
 </p>
 
 <p align="center">
-  <img src="wechat.jpg" alt="VoiceMem WeChat Group" width="60%">
+  <img src="assets/wechat.jpg" alt="VoiceMem WeChat Group" width="60%">
 </p>
 
 ---
@@ -620,14 +620,14 @@ http://localhost:8787
 Instead of storing every type of memory in a single retrieval database, VoiceMem separates memory into two complementary parts:
 
 <p align="center">
-  <img src="./docs/images/fig-architecture.webp" alt="VoiceMem Architecture" width="80%">
+  <img src="docs/images/fig-architecture.webp" alt="VoiceMem Architecture" width="80%">
 </p>
 
 * **Left Brain** organizes factual memory using schemas and entities for more accurate retrieval.
 * **Right Brain** manages personality, emotion, and relationships using independent and cross-entity memory nodes.
 
 <p align="center">
-  <img src="./docs/images/stages.webp" alt="VoiceMem Processing Pipeline" width="90%">
+  <img src="docs/images/stages.webp" alt="VoiceMem Processing Pipeline" width="90%">
 </p>
 
 The entire pipeline is **streaming**.
@@ -659,7 +659,7 @@ After human editing, the same pipeline produces **ChatMem-Bench**, which evaluat
 The open-source VoiceMem model family includes **Qwen2.5-Omni, Qwen3-Omni, and Step-Audio2-Mini**. These models can receive and understand memory information provided by VoiceMem during conversations.
 
 <p align="center">
-  <img src="./docs/images/fig-opd.webp" alt="VoiceMem OPD Pipeline" width="90%">
+  <img src="docs/images/fig-opd.webp" alt="VoiceMem OPD Pipeline" width="90%">
 </p>
 
 ## 🔌 Customize Your Voice Agent with VoiceMem
@@ -708,7 +708,7 @@ See **[finetune/README.md](finetune/README.md)** for the training data format, G
 The evaluation pipeline is fully open source and reproducible.
 
 <p align="center">
-  <img src="./assets/evaluation.webp" alt="VoiceMem Evaluation Results" width="100%">
+  <img src="assets/evaluation.webp" alt="VoiceMem Evaluation Results" width="100%">
 </p>
 
 ### Run Evaluation

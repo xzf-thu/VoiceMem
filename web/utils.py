@@ -8,7 +8,7 @@ import os
 import re
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
@@ -143,9 +143,12 @@ def hits_payload(result, has_audio=None, cluster_of=None):
 
 
 # ── FastAPI + WS 接线（仅接线，渲染都在 index.html）─────────────────────────────
-def build_app(mode, session, classify, snapshot=None, audio_of=None):
+def build_app(mode, session, classify, snapshot=None, audio_of=None, spaces=None,
+              set_lang=None):
     """session(sock)：run.py 传入的会话循环（llm_tts / realtime）。classify(query)：给脑图生长用。
-    snapshot()：库里已有的记忆，前端打开页面时先把脑图铺满。"""
+    snapshot()：库里已有的记忆，前端打开页面时先把脑图铺满。
+    spaces=(list_fn, create_fn, use_fn, active_fn)：Memory Space 的增/查/切换。
+    set_lang(lang)：界面切语言时同步给助手（回复语言 + 抽取语言）。"""
     app = FastAPI()
 
     @app.websocket("/ws")
@@ -197,6 +200,36 @@ def build_app(mode, session, classify, snapshot=None, audio_of=None):
     @app.get("/api/memories")                        # 打开页面时先铺已有记忆
     def api_memories() -> dict:
         return snapshot() if snapshot else {"left": [], "right": []}
+
+    @app.post("/api/lang")                           # 界面切语言时，助手也跟着切
+    async def api_lang(req: Request) -> dict:
+        lang = (await req.json()).get("lang", "zh")
+        set_lang(lang) if set_lang else None
+        return {"lang": lang}
+
+    if spaces:
+        _list_spaces, _create_space, _use_space, _active_space = spaces
+
+        @app.get("/api/spaces")                      # 磁盘上有哪些空间
+        def api_spaces() -> dict:
+            return {"spaces": _list_spaces(), "active": _active_space()}
+
+        @app.post("/api/spaces")                     # 新建一个空的
+        async def api_space_new(req: Request) -> dict:
+            name = (await req.json()).get("name", "")
+            try:
+                return _create_space(name)
+            except FileExistsError as e:
+                raise HTTPException(409, str(e))
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+
+        @app.post("/api/spaces/{name}/use")           # 切过去
+        def api_space_use(name: str) -> dict:
+            try:
+                return {"active": _use_space(name)}
+            except Exception as e:
+                raise HTTPException(400, f"切不过去：{e}")
 
     @app.get("/api/audio/{memory_id}")               # 把当时那段原声放回来
     def api_audio(memory_id: str):

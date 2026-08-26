@@ -174,6 +174,48 @@ _STRANGER = ("说话的不是你认识的那个人——声纹对不上。你对
              "别把别人的事讲给他听，也别猜他是谁。就当第一次见面，"
              "友好但如实地说你还不认识他。")
 
+#: 这一轮一条记忆都没检索到时追加的一句。
+#:
+#: 人设里那套"从含糊的一句话里猜出具体那件事"的指示，在有记忆时是这套系统最值钱
+#: 的地方，可**一条都没检索到**时它就成了编造的许可证：新建一个空的 Memory Space、
+#: 第一句问「我不能吃什么」，它张口就是「你的饮食禁忌里，辣椒和海鲜要注意，之前
+#: 你提到过对这些过敏」——两样都是凭空来的。空库的第一句话就撞得上，而那正是别人
+#: 第一次用这个 demo 的时刻。
+#:
+#: 跟 _STRANGER 的区别：那句是"你认识的是另一个人"，这句是"这件事你不知道"。
+#: 界面选的语言。助手跟着它走——回复用这个语言，抽出来的记忆也用这个语言写。
+#:
+#: 记忆的语言必须跟着一起换，不然库里会中英混着长：同一件事今天记成中文、明天
+#: 记成英文，检索时两边都只能命中一半。
+UI_LANG = "zh"
+
+_LANG_NOTE = {
+    "zh": "",     # 默认就是中文，不用多说
+    "en": ("Speak English. The user has switched the interface to English, so reply "
+           "in English even if their memories are stored in Chinese — translate what "
+           "you remember, don't quote it in Chinese."),
+}
+
+
+def set_lang(lang: str) -> None:
+    global UI_LANG
+    UI_LANG = "en" if str(lang).lower().startswith("en") else "zh"
+    print(f"[lang] 助手改说 {UI_LANG}", flush=True)
+
+
+def _lang_note() -> str:
+    return _LANG_NOTE.get(UI_LANG, "")
+
+
+_NO_MEMORY_NOTE = (
+    "这一轮你没有检索到任何相关记忆。所以：**不要提任何具体的事**——"
+    "食物、地点、人名、日期、他做过什么、他喜欢什么，一个都不许说，"
+    "更不能说「你之前提到过」「我记得你说过」。"
+    "如实说这件事你还不知道，然后问他，或者就着他这句话本身聊。"
+    "宁可显得记性不好，也不要编——编出来的东西他一眼就看得穿，"
+    "而且会让他不再相信你真记得的那些。"
+)
+
 
 #: 问的是"一段声音"时才回放。故意做得很笨——这是个触发词表，不是意图分类器：
 #: 多放一次听感上只是"它把当时那段放给你听"，判漏了也只是回到手动点 ▶。
@@ -762,10 +804,15 @@ def _realtime_instructions(memory_context: str, stranger: bool = False,
     ``text``：用户这一轮说的话。只用来判断"他是不是在找一段录音而我们没找到"——
     那种情况要明说没找到，否则模型会顺口答"马上播放"然后什么都不放。"""
     if stranger:
-        return f"{_RT_PERSONA}\n\n{_STRANGER}"
+        out = f"{_RT_PERSONA}\n\n{_STRANGER}"
+        return f"{out}\n\n{_lang_note()}" if _lang_note() else out
     parts = [_RT_PERSONA]
     if memory_context:
         parts.append(memory_context)
+    else:
+        parts.append(_NO_MEMORY_NOTE)      # 一条都没检索到：明说不知道，别编
+    if _lang_note():
+        parts.append(_lang_note())
     tone = _tone_note(emotion)
     if tone:
         parts.append("他此刻的状态：" + tone)
@@ -803,7 +850,88 @@ if ARGS.config:
 REPLY = CONFIG.get("reply")                           # 传给 utils 的回复函数
 
 # 声明式构造：from_config 是现有注入机制之上的糖（VoiceMem(embedding=fn, schema=fn,…)）。
-vm = VoiceMem.from_config(CONFIG)
+#: 每个 Memory Space 一个 VoiceMem 实例，按需建、建好留着。
+#:
+#: 同一进程内建第二个实例几乎不花钱：模型是懒加载 + 进程内复用的，实测建实例
+#: 0.0s、预热 2.5s（第一个是 6.8s + 4.9s）。所以切换空间不用重启服务。
+_SPACES: dict = {}
+
+
+def space_dir(name: str):
+    """这个空间在磁盘上的目录。名字只允许字母数字和 - _，避免路径穿越。"""
+    import re as _re
+    safe = _re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]", "", (name or "").strip())[:32]
+    if not safe:
+        raise ValueError("空间名字不能为空")
+    return _ROOT / "voicemem_memoryspace" / safe, safe
+
+
+def get_space(name: str):
+    """取（必要时创建）这个空间的 VoiceMem。"""
+    _, safe = space_dir(name)
+    if safe not in _SPACES:
+        cfg = dict(CONFIG)
+        cfg["space"] = safe
+        t0 = time.monotonic()
+        inst = VoiceMem.from_config(cfg)
+        inst.warmup(verbose=False)
+        _SPACES[safe] = inst
+        print(f"[space] 打开「{safe}」用了 {time.monotonic()-t0:.1f}s", flush=True)
+    return _SPACES[safe]
+
+
+def use_space(name: str) -> str:
+    """切到这个空间。返回真正用的名字。
+
+    ``vm`` 是模块级全局，下游全部按名字在运行时查找，所以这里重新绑定就够了——
+    不用把实例一路传下去。注意 build_app 收的那几个回调必须是 lambda 而不是
+    ``vm.classify`` 这种绑定方法，绑定方法会把切换前那个实例焊死。
+    """
+    global vm, ACTIVE_SPACE
+    vm = get_space(name)
+    _, ACTIVE_SPACE = space_dir(name)
+    return ACTIVE_SPACE
+
+
+def list_spaces() -> list:
+    """磁盘上有哪些 Memory Space，各有多少条记忆。"""
+    import sqlite3
+    root = _ROOT / "voicemem_memoryspace"
+    out = []
+    for d in sorted(p for p in root.glob("*") if p.is_dir()):
+        n = 0
+        try:
+            from voicemem.utils.common import space as _sp
+            db = _sp.db(d)
+            if Path(db).exists():
+                c = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+                n = c.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+                c.close()
+        except Exception:
+            n = 0
+        out.append({"id": d.name, "name": d.name, "count": n,
+                    "active": d.name == ACTIVE_SPACE, "open": d.name in _SPACES})
+    return out
+
+
+def create_space(name: str) -> dict:
+    """建一个新的空 Memory Space：磁盘上出现这个名字的文件夹，里面是全新的空库。
+
+    实例这里就建出来（顺带预热），这样点完"创建"立刻就能对话，不用等第一句话
+    卡在模型加载上。
+    """
+    d, safe = space_dir(name)
+    if d.exists() and any(d.iterdir()):
+        raise FileExistsError(f"「{safe}」已经存在了")
+    d.mkdir(parents=True, exist_ok=True)
+    get_space(safe)                      # 建库 + 预热
+    print(f"[space] 新建「{safe}」→ {d}", flush=True)
+    return {"id": safe, "name": safe, "count": 0}
+
+
+ACTIVE_SPACE = ""
+vm = None
+use_space(ARGS.space)
 
 
 #: 语音轮的音频落在这儿。归档表存的是路径，文件本身得真的在。
@@ -958,7 +1086,34 @@ def _sensevoice():
     return _SV["t"]
 
 
-def fill_tags(payload: dict, text: str, audio_path: str = "") -> dict:
+def _kick_acoustic(send, audio_path: str) -> None:
+    """把声学情绪扔到后台算，算出可信结果再补一条 tag_update。
+
+    emotion2vec 要跑整段音频，实测 2.3 秒。放在发 memory_hits 之前就等于把这
+    2.3 秒加在"用户说完 → 助手开口"中间，而它给的结果十有八九还够不上信任阈值。
+    放后台之后热路径一秒都不欠，真判准了 UI 上的情绪标签照样会更新。
+    """
+    if not audio_path or os.environ.get("VOICEMEM_ACOUSTIC_TAG", "1") == "0":
+        return
+
+    async def run():
+        try:
+            t0 = time.monotonic()
+            emo, score = await asyncio.to_thread(_acoustic_emotion, audio_path)
+            take = bool(emo) and score >= ACOUSTIC_MIN_SCORE and emo in ACOUSTIC_TRUST
+            if BARGE_DEBUG:
+                print(f"  [emotion] 声学(后台) {(time.monotonic()-t0)*1000:.0f}ms "
+                      f"-> {emo or '-'} {score:.2f}（{'采纳' if take else '不采纳'}）", flush=True)
+            if take:
+                await send({"type": "tag_update", "emotion": emo, "emotion_from": "acoustic"})
+        except Exception as e:
+            print(f"[web] 后台声学情绪跳过：{type(e).__name__}: {e}", flush=True)
+
+    asyncio.create_task(run())
+
+
+def fill_tags(payload: dict, text: str, audio_path: str = "",
+              acoustic: bool = True) -> dict:
     """补上标签栏要的 emotion / entities——两样都是 0 LLM、0 网络。
 
     检索走的是本地 slot 分类器（投机预算内不能联网），它只出 slot，不出实体；
@@ -994,7 +1149,7 @@ def fill_tags(payload: dict, text: str, audio_path: str = "") -> dict:
     #    韵律启发式也一样。这个麦克风/说话方式下，声学读不准。
     #    所以留着它，但要求 score ≥ ACOUSTIC_MIN_SCORE 才作数——真正带情绪地
     #    说话时它会给 0.95+，平淡说话时给的是 0.6、0.7 那种，正好挡掉。
-    if audio_path and os.environ.get("VOICEMEM_ACOUSTIC_TAG", "1") != "0":
+    if acoustic and audio_path and os.environ.get("VOICEMEM_ACOUSTIC_TAG", "1") != "0":
         try:
             t0 = time.monotonic()
             emo, score = _acoustic_emotion(audio_path)
@@ -1042,10 +1197,17 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, said=None):
     在字数上没区别，只能靠内容认。
     """
     await send({"type": "user_transcript", "text": pending.text})
+    # 声学情绪**不在这儿算**。它要 2.3 秒（emotion2vec 跑整段音频），而这几行是
+    # 用户说完到助手开口之间最要紧的一段——实测这一步就吃掉了 4.5 秒里的一半，
+    # 算完还常常因为"把握不够"被丢掉，纯浪费。
+    # 先用文本语义那份（毫秒级）把标签发出去，声学放后台跑，可信了再补一条
+    # tag_update 覆盖 UI 上的情绪。
+    note_hits(pending.result)      # 让脑图快照保证这几条在图上
     await send({"type": "memory_hits",
                 **fill_tags(utils.hits_payload(pending.result, has_audio=audio_of,
                                               cluster_of=hit_cluster),
-                            pending.text, pending.audio_path or "")})
+                            pending.text, pending.audio_path or "", acoustic=False)})
+    _kick_acoustic(send, pending.audio_path or "")
     if pending.replay:
         _note_replay(pending.replay)
         await send({"type": "play_memory", "memory_id": pending.replay})
@@ -1071,6 +1233,8 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, said=None):
         # 走核心回复层（人设在 CONFIG.reply.llm.config.system，见 voicemem/reply.py
         # 的 compose_system：system + memory_context，和 realtime 那条拼出来的一样）。
         ctx = _STRANGER if pending.stranger else pending.memory_context
+        if not pending.stranger and not (ctx or "").strip():
+            ctx = _NO_MEMORY_NOTE          # 一条都没检索到：明说不知道，别编
         tone = _tone_note(pending.emotion)
         if tone:
             ctx = (ctx + "\n\n他此刻的状态：" + tone) if ctx else ("他此刻的状态：" + tone)
@@ -1078,6 +1242,8 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, said=None):
                 else (_NO_REPLAY_NOTE if _wants_sound(pending.text) else ""))
         if note:
             ctx = f"{ctx}\n\n{note}" if ctx else note
+        if _lang_note():
+            ctx = f"{ctx}\n\n{_lang_note()}" if ctx else _lang_note()
         async for d in vm.reply_stream(pending.text, ctx):
             reply += d
             buf += d
@@ -1116,10 +1282,12 @@ async def start_realtime_turn(pending, conn, send):
     response.done 会被下一轮读到，当成自己说完了。
     """
     await send({"type": "user_transcript", "text": pending.text})
+    note_hits(pending.result)      # 让脑图快照保证这几条在图上
     await send({"type": "memory_hits",
                 **fill_tags(utils.hits_payload(pending.result, has_audio=audio_of,
                                               cluster_of=hit_cluster),
-                            pending.text, pending.audio_path or "")})
+                            pending.text, pending.audio_path or "", acoustic=False)})
+    _kick_acoustic(send, pending.audio_path or "")
     if pending.replay:
         # 前端收下先记着，等这一轮回复播完再放——助手的回复是排队播的，
         # 提前放会跟人声叠在一起。
@@ -1765,6 +1933,20 @@ def _right_brain_tree_v1(uid: str, facts: dict) -> list:
     return out
 
 
+#: 最近一轮检索命中的记忆 id。快照要保证它们在图上——脑图上亮起来的必须是
+#: 后端真正检索到的那几条，命中了却没画出来，"它记得这件事"就没演出来。
+_LAST_HIT_IDS: set = set()
+
+
+def note_hits(result) -> None:
+    """记下这一轮检索命中了哪些左脑记忆。"""
+    _LAST_HIT_IDS.clear()
+    for h in (getattr(result, "hits", None) or []):
+        mid = getattr(h, "memory_id", "")
+        if mid:
+            _LAST_HIT_IDS.add(str(mid))
+
+
 def memory_snapshot(limit: int = 48) -> dict:
     """库里已有的记忆，供前端在打开页面时把脑图先铺满。
 
@@ -1789,14 +1971,24 @@ def memory_snapshot(limit: int = 48) -> dict:
         entries = [e for e in entries if e.get("role") != "assistant"]
         # 每个 slot 也限量。脑图上一个 slot 就是一块扇形，面积固定——daily_life
         # 攒到二十几条时那块就糊了，而别的 slot 才三四个点。限量之后各簇疏密一致。
+        #
+        # 但**这一轮检索命中的那几条必须留下**，哪怕它排在限量之外：图上亮起来的
+        # 得是后端真检索到的东西，命中了却没画出来，看着就像"检索到 5 条只亮了 3 个"。
+        # 命中的先排进去，剩下的名额再按原来的顺序填。
         per_slot, kept = {}, []
-        for e in entries:
+        hit_first = ([e for e in entries if str(e["id"]) in _LAST_HIT_IDS] +
+                     [e for e in entries if str(e["id"]) not in _LAST_HIT_IDS])
+        for e in hit_first:
             sl = slot_of.get(e["id"], "daily_life")
+            hit = str(e["id"]) in _LAST_HIT_IDS
             per_slot[sl] = per_slot.get(sl, 0) + 1
-            if per_slot[sl] <= LB_ENTRIES_PER_SLOT:
+            if hit or per_slot[sl] <= LB_ENTRIES_PER_SLOT:
                 kept.append(e)
         entries = kept
-        for e in entries[:limit]:
+        # 同理，命中的那几条不能被 limit 截掉
+        head = [e for e in entries if str(e["id"]) in _LAST_HIT_IDS]
+        rest = [e for e in entries if str(e["id"]) not in _LAST_HIT_IDS]
+        for e in (head + rest)[:max(limit, len(head))]:
             # list_entries 的 date 直接截了 time_start 前 10 位，遇到纯时间串会切出
             # "09:20:37" 这种。不像日期就置空，别把垃圾送到前端。
             d = str(e.get("date", ""))
@@ -1812,8 +2004,13 @@ def memory_snapshot(limit: int = 48) -> dict:
                     ents.append(nm or eid)
             except Exception:
                 ents = []
+            # hit：这条是被这一轮检索命中、因而保底留在图上的。
+            # 前端拿"图上多出了哪条"来判断"刚说的这句抽出了什么实体"，而保底进来
+            # 的是**旧记忆**——不标出来的话，说一句「啦啦啦」也会让上次那些实体
+            # （Jiaqi、室友、打游戏…）冒到标签栏上。
             left.append({"text": e["text"], "date": d if d[:4].isdigit() else "",
                          "slot": slot_of.get(e["id"], "daily_life"),
+                         "hit": str(e["id"]) in _LAST_HIT_IDS,
                          "entities": list(ents)[:6]})
     except Exception as e:
         print(f"[web] 左脑快照读取失败：{e}", flush=True)
@@ -1824,7 +2021,12 @@ def memory_snapshot(limit: int = 48) -> dict:
     return {"left": left, "right": right}
 
 
-app = utils.build_app(MODE, realtime_session if MODE == "realtime" else llm_tts_session, vm.classify, memory_snapshot, audio_of)
+# classify 必须包一层：直接传 vm.classify 会把**当前这个**实例焊进去，
+# 切换空间之后脑图还在给旧空间分类。
+app = utils.build_app(MODE, realtime_session if MODE == "realtime" else llm_tts_session,
+                      lambda *a, **k: vm.classify(*a, **k), memory_snapshot, audio_of,
+                      spaces=(list_spaces, create_space, use_space, lambda: ACTIVE_SPACE),
+                      set_lang=set_lang)
 
 
 if __name__ == "__main__":
