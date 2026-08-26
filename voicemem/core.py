@@ -97,6 +97,9 @@ class VoiceMem:
     def ingest(self, text=None, audio=None, **kw):
         """记一句话。``ingest("文本")`` 存文本；``ingest(audio="x.wav")`` 只给音频时
         先本地转写再存（同一段音频照样跑声纹/场景/情绪感知）。两个都给就用给的文本。"""
+        if audio is not None:
+            from voicemem import sample_audio   # 局部导入：__init__ 会 import core，顶层引会循环
+            audio = sample_audio(audio)
         if text is None:
             if audio is None:
                 raise ValueError("ingest() 要么给 text，要么给 audio")

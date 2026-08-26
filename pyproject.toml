@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "voicemem"
-version = "0.2.2"
+version = "0.2.3"
 description = "Left-brain/right-brain memory framework with an audio-native perception layer (scene/speaker/emotion)."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -78,4 +78,10 @@ include = ["voicemem*"]
 # data/ 下的 prompt 文本是运行时读的（见 leftbrain/mem0_additive_prompt_build.py），
 # 不显式声明的话 wheel 里不会有，装完一调用就 FileNotFoundError。
 [tool.setuptools.package-data]
-"*" = ["data/*.txt", "*.txt"]
+# data/ 下的 prompt 文本是运行时读的（见 leftbrain/mem0_additive_prompt_build.py），
+# 不显式声明的话 wheel 里不会有，装完一调用就 FileNotFoundError。
+#
+# assets/*.wav 是 README 和 examples 里用的示例音频（一共 1MB）。不打进包的话，
+# pip 装完照 README 跑第一个例子就是 LibsndfileError——那是别人对这个项目的
+# 第一印象。voicemem.sample_audio() 会先找仓库里的 assets/，没有再回落到这份。
+"*" = ["data/*.txt", "*.txt", "assets/*.wav"]

@@ -12,8 +12,8 @@ export OPENAI_API_KEY=sk-...
 | [`01_memory.py`](01_memory.py) | 存和查 —— 最小用法 | 音频那半段要 `bash scripts/download_models.sh` |
 | [`02_streaming.py`](02_streaming.py) | 流式接口：喂音频块，看每一轮算出了什么 | 同上 |
 | [`03_simple_agent_with_voicemem_memory.py`](03_simple_agent_with_voicemem_memory.py) | 完整语音 agent：边听边取记忆、说话时能被打断 | 一个麦克风 |
-| [`04_all_local_l40s.py`](04_all_local_l40s.py) | 全开源组件，一张 L40S 流式跑起来，全程不出机器 | 一个本机 vLLM + `pip install sounddevice voxcpm pywebrtc-audio` |
-| [`05_realtime_gpt_qwen.py`](05_realtime_gpt_qwen.py) | 接 gpt-realtime / qwen-omni-realtime，记忆随 response 注入 | `pip install sounddevice pywebrtc-audio "websockets>=14"` |
+| [`04_all_local_l40s.py`](04_all_local_l40s.py) | 全开源组件，一张 L40S 流式跑起来，全程不出机器 | 一个本机 vLLM + `pip install voxcpm` |
+| [`05_realtime_gpt_qwen.py`](05_realtime_gpt_qwen.py) | 接 gpt-realtime / qwen-omni-realtime，记忆随 response 注入 | 什么都不用装（都在 base 依赖里） |
 | [`06_mic_memory.py`](06_mic_memory.py) | **只听不答**：麦克风 → 转写 → 检索记忆。没有 LLM、没有 TTS | 一个麦克风 |
 
 ## 01 · 存和查

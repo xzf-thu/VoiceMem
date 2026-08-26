@@ -48,3 +48,5 @@ vm = VoiceMem.from_config({**LOCAL, "mode": "leftbrain_only"})
 vm.ingest("我是素食主义者，对坚果过敏。")
 
 result = vm.search("我的饮食禁忌是什么？", top_k=5)
+
+print(result.result_leftbrain, result.result_rightbrain)

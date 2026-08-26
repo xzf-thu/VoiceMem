@@ -188,3 +188,27 @@ if TYPE_CHECKING:  # pragma: no cover
     from voicemem.utils.audio.emotion import (
         EmotionLayer, EmotionLayerConfig, EmotionLayerResult,
     )
+
+def sample_audio(path):
+    """把示例音频的路径解析成真的能打开的路径。
+
+    README 和 examples 里写的是 ``assets/input.wav``——那是**仓库里**的相对路径。
+    ``pip install voicemem`` 的人没有那个目录，照着 README 跑第一个例子就是
+    LibsndfileError，而那正是别人对这个项目的第一印象。
+
+    所以：给的路径存在就原样用（clone 仓库的人不受任何影响）；不存在、而包里带了
+    同名的示例音频，就回落到包内那份。传别的路径时行为不变——找不到就还是找不到，
+    让原来的错误照常抛出来，不会把"用户写错路径"悄悄变成"放了段示例音频"。
+    """
+    import os
+    from pathlib import Path
+
+    if path is None:
+        return None
+    p = Path(str(path))
+    if p.exists():
+        return str(path)
+    packaged = Path(__file__).resolve().parent / "assets" / p.name
+    if packaged.is_file():
+        return str(packaged)
+    return str(path)

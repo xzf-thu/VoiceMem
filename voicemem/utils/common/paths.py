@@ -72,9 +72,20 @@ def hf_model(kind: str, default_id: str, env_override: str | None = None) -> str
     return default_id
 
 
-def require(path: Path, what: str, how: str = "bash scripts/download_models.sh models") -> Path:
-    """模型文件不在就报一句人能看懂的话，而不是让底层库抛个看不懂的错。"""
+def require(path: Path, what: str, how: str = "") -> Path:
+    """模型文件不在就报一句人能看懂的话，而不是让底层库抛个看不懂的错。
+
+    提示要分两种人说：clone 了仓库的人跑 scripts/download_models.sh 就行；
+    ``pip install voicemem`` 的人根本没有 scripts/ 目录，让他跑那条命令等于没说。
+    看当前目录有没有那个脚本来决定说哪句。
+    """
     if not Path(path).exists():
+        if not how:
+            if Path("scripts/download_models.sh").is_file():
+                how = "bash scripts/download_models.sh models"
+            else:
+                how = ("git clone https://github.com/xzf-thu/VoiceMem && "
+                       "bash VoiceMem/scripts/download_models.sh models")
         raise FileNotFoundError(
             f"{what} 找不到：{path}\n"
             f"下载：{how}\n"
