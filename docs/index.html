@@ -217,15 +217,24 @@
   .glass .d.b{background:var(--blue);box-shadow:0 0 9px var(--blue)}
   .glass .d.p{background:var(--pink);box-shadow:0 0 9px var(--pink)}
   .glass .d.g{background:var(--leaf);box-shadow:0 0 9px var(--leaf)}
-  /* 「TRY IT NOW」是唯一指向线上 demo 的入口：靠 flex-basis:100% 换到第二行，
-     跟另外三个拉开，配色也换成金色。 */
-  .glass{flex-wrap:wrap;justify-content:center;row-gap:clamp(9px,1vw,14px)}
-  #btn-try{flex:0 0 100%;justify-content:center;
-    background:rgba(255,196,74,.20);border-color:rgba(255,196,74,.5);color:#fff}
-  #btn-try:hover{background:rgba(255,196,74,.34);border-color:#ffc44a;color:#fff}
+  /* 「Try it now」是唯一通往线上 demo 的入口，放在三个胶囊下面单独一行——但**不**做
+     成第四个胶囊：四个一样重的按钮谁都不突出，而且横过整排的金色块太糙。退成一行
+     小字加箭头，反倒因为是全场唯一有颜色的一行而更抓眼。 */
+  .glass{flex-wrap:wrap;justify-content:center;row-gap:clamp(7px,.7vw,11px)}
+  #btn-try{
+    flex:0 0 100%;justify-content:center;gap:7px;
+    /* .glass > * 那套胶囊样式在这儿全部退掉 */
+    padding:2px 0;border:none;border-radius:0;background:none;box-shadow:none;
+    backdrop-filter:none;-webkit-backdrop-filter:none;
+    font-size:clamp(9.5px,.8vw,11.5px);letter-spacing:.24em;
+    color:#ffc44a;opacity:.88;transition:opacity .25s ease,color .25s ease;
+  }
+  #btn-try::after{content:"→";letter-spacing:0;opacity:.8}
+  #btn-try:hover{background:none;border:none;color:#ffd884;opacity:1}
+  #btn-try .d{width:4px;height:4px;opacity:.9}
   /* demo 跑在一台自托管的机器上，它关着的时候别把访客送去一个打不开的链接。 */
-  #btn-try.down{background:var(--barbg);border-color:var(--barbd);opacity:.5;
-    cursor:not-allowed;pointer-events:none}
+  #btn-try.down{color:var(--bartx);opacity:.38;cursor:not-allowed;pointer-events:none}
+  #btn-try.down::after{content:""}
   #btn-try.down .d{background:#8b90a0;box-shadow:none}
   .glass .d.y{background:#ffc44a;box-shadow:0 0 9px #ffc44a}
   /* ---------- memory card ---------- */
