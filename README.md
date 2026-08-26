@@ -53,7 +53,7 @@
 
 <div align="center">
   <video
-    src="https://private-user-images.githubusercontent.com/201621992/637588589-34d46638-20db-4943-a88b-b3826c16f156.mp4"
+    src="https://private-user-images.githubusercontent.com/201621992/641670786-5193806c-804b-4356-81aa-29e14b3a3678.mp4"
     width="1000"
     controls>
   </video>
@@ -447,7 +447,7 @@ A quick overview of VoiceMem:
 
 <div align="center">
   <video
-    src="https://private-user-images.githubusercontent.com/201621992/637588589-34d46638-20db-4943-a88b-b3826c16f156.mp4"
+    src="https://private-user-images.githubusercontent.com/201621992/641670786-5193806c-804b-4356-81aa-29e14b3a3678.mp4"
     width="1000"
     controls>
   </video>

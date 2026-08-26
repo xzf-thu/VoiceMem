@@ -433,7 +433,7 @@
   border:1px solid var(--edge);border-radius:18px;background:#fff;
   box-shadow:0 30px 80px -50px rgba(20,30,50,.45);
 }
-#page2 .d-frame iframe{display:block;width:100%;aspect-ratio:16/9;border:0;border-radius:11px;background:#0b0c0f}
+#page2 .d-frame iframe,#page2 .d-frame video{display:block;width:100%;aspect-ratio:16/9;border:0;border-radius:11px;background:#0b0c0f;object-fit:cover}
 .d-link{
   font-size:15px;font-weight:600;color:var(--accent);text-decoration:none;
   padding:9px 18px;border:1px solid rgba(63,116,182,.34);border-radius:999px;
@@ -928,13 +928,9 @@
     <p class="ch-say" data-i18n="demo.say">Talk to it once. It knows you next time.</p>
   </header>
   <div class="d-frame" id="d-frame">
-    <iframe id="demo-youtube"
-      src="https://www.youtube.com/embed/4YuBkMm1cmU?rel=0&modestbranding=1"
-      title="VoiceMem demo" loading="lazy"
-      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-      referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+    <video id="demo-video" src="output_normal.mp4"
+      title="VoiceMem demo" controls playsinline preload="metadata"></video>
   </div>
-  <a class="d-link" href="https://www.youtube.com/watch?v=4YuBkMm1cmU" target="_blank" rel="noopener"><span data-i18n="demo.watch">Watch on YouTube</span> &#8599;</a>
 </section>
 
 <!-- ================= PAGE THREE — quick start ================= -->
