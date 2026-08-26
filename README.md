@@ -51,13 +51,7 @@
 
 > **注意：** 播放前需要先取消静音。
 
-<div align="center">
-  <video
-    src="https://github.com/user-attachments/assets/5193806c-804b-4356-81aa-29e14b3a3678"
-    width="1000"
-    controls>
-  </video>
-</div>
+https://github.com/user-attachments/assets/5193806c-804b-4356-81aa-29e14b3a3678
 
 ## 📚 目录
 
@@ -445,13 +439,7 @@ A quick overview of VoiceMem:
 
 > **Note:** Please unmute the video before playback.
 
-<div align="center">
-  <video
-    src="https://github.com/user-attachments/assets/5193806c-804b-4356-81aa-29e14b3a3678"
-    width="1000"
-    controls>
-  </video>
-</div>
+https://github.com/user-attachments/assets/5193806c-804b-4356-81aa-29e14b3a3678
 
 ## 📚 Overview
 
