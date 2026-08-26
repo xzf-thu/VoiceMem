@@ -217,6 +217,17 @@
   .glass .d.b{background:var(--blue);box-shadow:0 0 9px var(--blue)}
   .glass .d.p{background:var(--pink);box-shadow:0 0 9px var(--pink)}
   .glass .d.g{background:var(--leaf);box-shadow:0 0 9px var(--leaf)}
+  /* 「TRY IT NOW」是唯一指向线上 demo 的入口：靠 flex-basis:100% 换到第二行，
+     跟另外三个拉开，配色也换成金色。 */
+  .glass{flex-wrap:wrap;justify-content:center;row-gap:clamp(9px,1vw,14px)}
+  #btn-try{flex:0 0 100%;justify-content:center;
+    background:rgba(255,196,74,.20);border-color:rgba(255,196,74,.5);color:#fff}
+  #btn-try:hover{background:rgba(255,196,74,.34);border-color:#ffc44a;color:#fff}
+  /* demo 跑在一台自托管的机器上，它关着的时候别把访客送去一个打不开的链接。 */
+  #btn-try.down{background:var(--barbg);border-color:var(--barbd);opacity:.5;
+    cursor:not-allowed;pointer-events:none}
+  #btn-try.down .d{background:#8b90a0;box-shadow:none}
+  .glass .d.y{background:#ffc44a;box-shadow:0 0 9px #ffc44a}
   /* ---------- memory card ---------- */
   #card{
     position:absolute;left:0;top:0;width:252px;z-index:7;
@@ -894,6 +905,7 @@
     <button type="button" id="btn-explore"><span class="d b"></span>Explore</button>
     <a href="https://github.com/xzf-thu/VoiceMem" id="btn-code" target="_blank" rel="noopener noreferrer"><span class="d p"></span>Code</a>
     <a href="https://arxiv.org/abs/2605.19833" id="btn-paper" target="_blank" rel="noopener noreferrer"><span class="d g"></span>Paper</a>
+    <a href="https://shuichengmac-mini.tailebef1c.ts.net" id="btn-try" target="_blank" rel="noopener noreferrer"><span class="d y"></span>Try it now</a>
   </div>
   <div id="cue">Scroll<i></i></div>
   <div id="veil"></div>
@@ -2921,7 +2933,7 @@ else brain.addEventListener('load', plateLoaded);
       hint:'MOVE CURSOR OVER THE CORTEX',accurate:'Accurate',accurateSub:'outperforms full-load Mem0',
       personal:'Personal',personalSub:'emotion + personality aware',realtime:'Realtime',realtimeSub:'streaming, near-zero overhead',
       efficient:'Efficient',efficientSub:'~300 tokens per turn',modular:'Modular',modularSub:'multimodal + fully customizable',
-      explore:'Explore',code:'Code',paper:'Paper',scroll:'Scroll'
+      explore:'Explore',code:'Code',paper:'Paper',tryit:'Try it now',tryDown:'Demo offline',tryBusy:'Demo busy · {0} in line',scroll:'Scroll'
     },
     'zh-CN':{
       language:'语言',contact:'联系',start:'开始使用',tag:'语音 AI 的灵魂',
@@ -2930,7 +2942,7 @@ else brain.addEventListener('load', plateLoaded);
       hint:'将光标移到脑区上',accurate:'准确',accurateSub:'优于完整加载的 Mem0',
       personal:'个性化',personalSub:'感知情绪与人格',realtime:'实时',realtimeSub:'流式处理，几乎零开销',
       efficient:'高效',efficientSub:'每轮约 300 tokens',modular:'模块化',modularSub:'多模态 + 完全可定制',
-      explore:'探索',code:'代码',paper:'论文',scroll:'向下滚动'
+      explore:'探索',code:'代码',paper:'论文',tryit:'立即体验',tryDown:'demo 暂时离线',tryBusy:'demo 忙碌 · 前面 {0} 人',scroll:'向下滚动'
     },
     'zh-TW':{
       language:'語言',contact:'聯絡',start:'開始使用',tag:'語音 AI 的靈魂',
@@ -2939,7 +2951,7 @@ else brain.addEventListener('load', plateLoaded);
       hint:'將游標移到腦區上',accurate:'準確',accurateSub:'優於完整載入的 Mem0',
       personal:'個人化',personalSub:'感知情緒與人格',realtime:'即時',realtimeSub:'串流處理，幾乎零額外負擔',
       efficient:'高效',efficientSub:'每回合約 300 tokens',modular:'模組化',modularSub:'多模態 + 完全可自訂',
-      explore:'探索',code:'程式碼',paper:'論文',scroll:'向下捲動'
+      explore:'探索',code:'程式碼',paper:'論文',tryit:'立即體驗',tryDown:'demo 暫時離線',tryBusy:'demo 忙碌 · 前面 {0} 人',scroll:'向下捲動'
     },
     ja:{
       language:'言語',contact:'お問い合わせ',start:'始める',tag:'音声 AI に、魂を。',
@@ -2948,7 +2960,7 @@ else brain.addEventListener('load', plateLoaded);
       hint:'カーソルを脳領域に合わせてください',accurate:'高精度',accurateSub:'フルロードの Mem0 を上回る',
       personal:'パーソナル',personalSub:'感情 + 人格を認識',realtime:'リアルタイム',realtimeSub:'ストリーミング、ほぼゼロの追加負荷',
       efficient:'高効率',efficientSub:'1 ターン約 300 トークン',modular:'モジュール式',modularSub:'マルチモーダル + 完全にカスタマイズ可能',
-      explore:'探索',code:'コード',paper:'論文',scroll:'スクロール'
+      explore:'探索',code:'コード',paper:'論文',tryit:'今すぐ試す',tryDown:'デモは現在オフライン',tryBusy:'混雑中 · {0} 人待ち',scroll:'スクロール'
     },
     ko:{
       language:'언어',contact:'문의',start:'시작하기',tag:'Voice AI의 영혼',
@@ -2957,7 +2969,7 @@ else brain.addEventListener('load', plateLoaded);
       hint:'커서를 뇌 영역 위로 이동하세요',accurate:'정확함',accurateSub:'전체 로드 Mem0보다 우수',
       personal:'개인화',personalSub:'감정 + 성격 인식',realtime:'실시간',realtimeSub:'스트리밍, 거의 제로 오버헤드',
       efficient:'효율적',efficientSub:'턴당 약 300 토큰',modular:'모듈식',modularSub:'멀티모달 + 완전 맞춤 설정',
-      explore:'탐색',code:'코드',paper:'논문',scroll:'스크롤'
+      explore:'탐색',code:'코드',paper:'논문',tryit:'지금 체험하기',tryDown:'데모 오프라인',tryBusy:'대기 중 · {0}명',scroll:'스크롤'
     }
   };
 
@@ -3128,6 +3140,7 @@ else brain.addEventListener('load', plateLoaded);
     setLastText(document.getElementById('btn-explore'),d.explore);
     setLastText(document.getElementById('btn-code'),d.code);
     setLastText(document.getElementById('btn-paper'),d.paper);
+    setLastText(document.getElementById('btn-try'),tryLabel(d));
     setFirstText(document.getElementById('cue'),d.scroll);
     const demo=document.getElementById('demo-youtube'); if(demo) demo.title='VoiceMem '+(l==='en'?'demo':(l==='ja'?'デモ':l==='ko'?'데모':l==='zh-TW'?'示範':'演示'));
     const comments=CODE_COMMENTS[l]||CODE_COMMENTS.en;
@@ -3136,6 +3149,31 @@ else brain.addEventListener('load', plateLoaded);
     document.querySelectorAll('#page3 .copy').forEach(b=>{ const s=l==='zh-CN'?'复制代码':l==='zh-TW'?'複製程式碼':l==='ja'?'コードをコピー':l==='ko'?'코드 복사':'Copy code'; b.setAttribute('aria-label',s); b.title=s; });
     window.dispatchEvent(new Event('resize'));
   }
+
+  /* demo 后端是自托管的（一台 Mac mini 走 Tailscale Funnel），它可能关着。
+     开页面时探一下 /healthz：不通就把按钮置灰写「demo 暂时离线」，有人在用就
+     写「前面几人」。探不通不影响页面其余部分，静默失败即可。 */
+  const TRY_HEALTH='https://shuichengmac-mini.tailebef1c.ts.net/healthz';
+  let tryState={up:null,queue:0};
+  function tryLabel(d){
+    if(tryState.up===false) return d.tryDown||d.tryit;
+    if(tryState.up&&tryState.queue>0) return (d.tryBusy||d.tryit).replace('{0}',tryState.queue);
+    return d.tryit;
+  }
+  async function probeTry(){
+    const btn=document.getElementById('btn-try'); if(!btn) return;
+    const ac=new AbortController(); const t=setTimeout(()=>ac.abort(),4000);
+    try{
+      const r=await fetch(TRY_HEALTH,{signal:ac.signal,cache:'no-store'});
+      const j=await r.json();
+      tryState={up:true,queue:(j.queue||0)+(j.busy?1:0)};
+    }catch(e){ tryState={up:false,queue:0}; }
+    finally{ clearTimeout(t); }
+    btn.classList.toggle('down',tryState.up===false);
+    applyPage1(lang());
+  }
+  probeTry();
+  setInterval(probeTry,60000);
 
   window.addEventListener('voicemem-language-change',e=>applyPage1((e.detail&&e.detail.lang)||lang()));
   applyPage1(lang());
