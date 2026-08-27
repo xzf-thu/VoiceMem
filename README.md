@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://xzf-thu.github.io/VoiceMem/">项目主页 🌐</a> /
-  <a href="https://arxiv.org/abs/2605.19833">技术报告 📖</a> /
+  <a href="https://arxiv.org/pdf/2608.26005">技术报告 📖</a> /
   <a href="https://huggingface.co/zhifeixie/VoiceMem_Default_Models_Env">VoiceMem Utils 🤗</a> /
   <a href="https://huggingface.co/zhifeixie/VoiceMem_MF_Qwen3_6_35B_A3B_Qlora">VoiceMem Model Families 🤗</a> /
   <a href="https://huggingface.co/datasets/zhifeixie/VoiceMem-ChatMem400k">ChatMem-400K 🤗</a>
@@ -402,7 +402,7 @@ VoiceMem 基于 **Apache License 2.0** 开源。
 
 <p align="center">
   <a href="https://xzf-thu.github.io/VoiceMem/">Project Page 🌐</a> /
-  <a href="https://arxiv.org/abs/2605.19833">Technical Report 📖</a> /
+  <a href="https://arxiv.org/pdf/2608.26005">Technical Report 📖</a> /
   <a href="https://huggingface.co/zhifeixie/VoiceMem_Default_Models_Env">VoiceMem Utils 🤗</a> /
   <a href="https://huggingface.co/zhifeixie/VoiceMem_MF_Qwen3_6_35B_A3B_Qlora">VoiceMem Model Families 🤗</a> /
   <a href="https://huggingface.co/datasets/zhifeixie/VoiceMem-ChatMem400k">ChatMem-400K 🤗</a>
