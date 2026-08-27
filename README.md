@@ -50,7 +50,11 @@
 ## 🎬 Demo
 
 > **注意：** 播放前需要先取消静音。
-[▶️ 点击查看演示视频](https://private-user-images.githubusercontent.com/201621992/641678899-162f6655-caa7-4e5d-9dd4-bc6546c4b43b.mov?jwt=...)
+<video width="100%" controls>
+  <source src="https://private-user-images.githubusercontent.com/201621992/641678899-162f6655-caa7-4e5d-9dd4-bc6546c4b43b.mov?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3ODc4MDI1OTUsIm5iZiI6MTc4NzgwMjI5NSwicGF0aCI6Ii8yMDE2MjE5OTIvNjQxNjc4ODk5LTE2MmY2NjU1LWNhYTctNGU1ZC05ZGQ0LWJjNjU0NmM0YjQzYi5tb3Y_WC1BbXotQWxnb3JpdGhtPUFXUzQtSE1BQy1TSEEyNTYmWC1BbXotQ3JlZGVudGlhbD1BS0lBVkNPRFlMU0E1M1BRSzRaQSUyRjIwMjYwODI3JTJGdXMtZWFzdC0xJTJGczMlMkZhd3M0X3JlcXVlc3QmWC1BbXotRGF0ZT0yMDI2MDgyN1QwMzQ0NTVaJlgtQW16LUV4cGlyZXM9MzAwJlgtQW16LVNpZ25hdHVyZT1iZGQwYzQ0ZGM0YWIwMDExMTVkMTQ1ZTA5OTgyOGFmOTI2NDY4ZTU4YzhlOWFiZDc1M2I5MWE5YTg1YTBjMjFmJlgtQW16LVNpZ25lZEhlYWRlcnM9aG9zdCZyZXNwb25zZS1jb250ZW50LXR5cGU9dmlkZW8lMkZxdWlja3RpbWUifQ.pdBoNhiazxnytLCs4tOA9EXnL6vO45EEtndj8EHyH2I" type="video/quicktime">
+  Your browser does not support the video tag.
+</video>
+
 
 ## 📚 目录
 * [🚀 快速开始](#-快速开始)
