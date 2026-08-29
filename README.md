@@ -28,6 +28,11 @@
   </a>
 </p>
 
+<div align="center">
+  <a href="https://xzf-thu.github.io/VoiceMem/">
+    <img src="assets/huggingface_paper_gold_day.svg"/>
+  </a>
+</div>
 <p align="center">
   <img src="assets/wechat.jpg" alt="VoiceMem 微信群" width="60%">
 </p>
