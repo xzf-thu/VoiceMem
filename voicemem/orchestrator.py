@@ -70,7 +70,9 @@ from voicemem.utils.defaults import default_utils
 # 攒了多少都会清账，所以不会一直积着不处理。
 SHORT_TERM_MIN_MEMORIES = int(os.environ.get("VOICEMEM_ATTRIBUTION_MIN_MEMORIES", "20"))
 
-# 每个 mode 需要哪些 util（只加载这些）
+# 每个 mode 需要哪些 util（只加载这些）。
+# tts 不在任何一档里：核心链路只到文本为止，出声是可选的一层，谁要出声谁
+# utils.get("tts")——搁进来会让没装 piper/voxcpm 的用户在 warmup 就炸。
 _NEED = {
     "left_brain_single": ["embedding", "schema", "entity", "memory_engine"],
     "text_mode":         ["embedding", "schema", "entity", "emotion", "memory_engine"],
@@ -166,8 +168,9 @@ class Orchestrator:
         → 组件用内置默认。与 ``util_overrides`` 里的 ``embedding`` / ``memory_engine`` /
         ``schema`` 覆盖等价（后者会构造出对象注入到这三个参数）。
     util_overrides:
-        按能力名覆盖内置默认（``embedding`` / ``schema`` / ``memory_engine`` 等）；
-        被覆盖的能力会注入对应组件构造参数。
+        按能力名覆盖内置默认（``embedding`` / ``schema`` / ``memory_engine`` /
+        ``tts`` 等，全表见 ``voicemem/utils/defaults.py``）；被覆盖的能力会注入
+        对应组件构造参数。
     """
 
     def __init__(

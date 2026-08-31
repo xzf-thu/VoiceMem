@@ -16,13 +16,15 @@
         "slots":     {"provider": "local"},                 # slot 分类走本地 E5（0 LLM）
         "vad":       {"provider": "silero"},                # 判「说完了」；custom 换自己的
         "memory_engine": {"provider": "mem0"},              # 向量库后端（默认 mem0）
+        "tts": {"provider": "openai",                       # 出声（可选的一层）
+                "config": {"model": "gpt-4o-mini-tts", "voice": "coral"}},
         "llm": {"provider": "openai",                       # 左右脑内部 LLM（打标签/归因…）
                 "config": {"model": "gpt-4o-mini", "api_key": "sk-...", "base_url": None}},
 
         # reply 段：回复模型。两种写法都认——
         "reply": {"provider": "openai", "config": {"model": "gpt-4o-mini"}},
-        # 或者 demo 那份嵌套写法（web/run.py 用），核心只取其中的 llm 段，
-        # tts / realtime 仍归 web demo 自己读：
+        # 或者 demo 那份嵌套写法（web/run.py 用）：llm 段解析成 reply，tts 段
+        # 解析成第九个可替换位，realtime 仍归 web demo 自己读：
         # "reply": {
         #     "llm":      {"provider": "openai", "config": {"model": "gpt-4o"}},
         #     "tts":      {"provider": "openai", "config": {"model": "gpt-4o-mini-tts"}},
@@ -39,6 +41,11 @@ provider → 内置实现 的映射（傻瓜清晰，一眼看懂）：
     vad.provider           silero -> make_vad（内置，config 可给 model / threshold）
                            custom -> config.obj 那个对象（要有 is_speech(frame)->bool）
     memory_engine.provider mem0   -> Mem0BackendStore（默认，也可不传走内置默认）
+    tts.provider           openai -> OpenAITTS（OpenAI TTS api，可配 voice/instructions）
+                           local  -> PiperTTS（离线 piper，别名 piper）
+                           voxcpm -> VoxCPMTTS（离线 VoxCPM2）
+                           breeze -> BreezeTTS（Breeze TTS 2 流式服务，可用自然语言
+                                     指挥语气；权重非商用许可，故不做默认）
     llm.provider           openai -> 落 OPENAI_MODEL / OPENAI_API_KEY / OPENAI_BASE_URL
     reply.provider         openai -> voicemem.reply.openai_reply（内置，流式）
                            custom -> config.fn 里那个可调用对象（等价于 VoiceMem(reply=fn)）
@@ -133,8 +140,24 @@ def _memory_engine_factory(provider, cfg):
     _bad("memory_engine", provider, ["mem0"])
 
 
+def _tts_factory(provider, cfg):
+    """tts：openai -> OpenAI TTS api；local/piper -> 离线 piper；voxcpm -> VoxCPM2。
+
+    provider 省了就跟 TTS_BACKEND 环境变量。provider 名在这儿就校验掉——留到第一次
+    出声才报错的话，那已经是在对话中间了。
+    """
+    from voicemem.tts import TTS_PROVIDERS
+    if provider is not None and str(provider).lower() not in TTS_PROVIDERS:
+        _bad("tts", provider, sorted(set(TTS_PROVIDERS)))
+
+    def make():
+        from voicemem.tts import make_tts
+        return make_tts(provider, **cfg)
+    return make
+
+
 # reply 段的 demo 嵌套写法（web/run.py 的 CONFIG["reply"]）里，这三个是子段名而不是
-# provider/config；核心只认其中的 llm，tts / realtime 归 web demo 自己读。
+# provider/config。llm 解析成 reply、tts 解析成 tts 可替换位，realtime 归 web 自己读。
 _REPLY_DEMO_KEYS = ("llm", "tts", "realtime")
 
 
@@ -162,8 +185,8 @@ def build_kwargs(config: dict) -> dict:
     ``api_key`` / ``base_url`` / ``mode`` + ``embedding`` / ``schema`` /
     ``memory_engine`` 等注入函数（无参工厂，语义同 ``VoiceMem(embedding=lambda: ...)``）。
 
-    ``reply`` 段解析成 ``VoiceMem(reply=fn)``；demo 那份嵌套写法只取其中的 ``llm``，
-    ``tts`` / ``realtime`` 仍由 web demo 自己读。
+    ``reply`` 段解析成 ``VoiceMem(reply=fn)``；demo 那份嵌套写法里 ``llm`` 解析成
+    reply、``tts`` 解析成 ``VoiceMem(tts=…)``，``realtime`` 仍由 web demo 自己读。
     """
     config = config or {}
     kwargs: dict = {}
@@ -219,6 +242,17 @@ def build_kwargs(config: dict) -> dict:
         if cfg.get("base_url"):
             os.environ["OPENAI_BASE_URL"] = cfg["base_url"]
             kwargs.setdefault("base_url", cfg["base_url"])
+
+    # ── tts：第九个可替换位。两处都认——顶层 "tts"，或 demo 那份 reply.tts
+    #    （web/run.py 一直这么写，以前核心不读、白写了，现在读）。顶层优先。──
+    tts_seg = config.get("tts")
+    if tts_seg is None:
+        _r = config.get("reply") or {}
+        if any(k in _r for k in _REPLY_DEMO_KEYS):
+            tts_seg = _r.get("tts")
+    if tts_seg is not None:
+        provider, cfg = _split(tts_seg)
+        kwargs["tts"] = _tts_factory(provider, cfg)
 
     # ── reply：回复模型。两种写法——扁平 {"provider","config"}，或 demo 那份
     #    {"llm","tts","realtime"} 嵌套（核心只取 llm，tts/realtime 仍由 web 自己读）。──
