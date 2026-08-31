@@ -37,7 +37,7 @@ import threading
 from typing import Any
 
 
-def build_memory_context(result: Any, max_rb: int = 3) -> str:
+def build_memory_context(result: Any, max_rb: int = 5) -> str:
     """Render a SearchResult into the memory-context text block.
 
     Single source of truth for how retrieved memory becomes prompt text --
@@ -45,14 +45,16 @@ def build_memory_context(result: Any, max_rb: int = 3) -> str:
     and "what we tell integrators to do" can never drift apart. Returns ""
     when there is nothing worth injecting.
 
-    ``max_rb``: right-brain hits are priority-sorted by Search(); capping at
-    3 was a real measured latency fix in the demo (all 5 measurably delayed
-    the reply model's first token), kept as the default here.
+    ``max_rb``: right-brain hits are priority-sorted by Search(). This was 3 for
+    a while -- letting all 5 through measurably delayed the reply model's first
+    token in the demo. It is back to 5 because the prompt now says "top5 in right
+    brain" and the header must not lie about what follows it. If first-token
+    latency matters more than coverage, pass max_rb=3 and fix the header too.
     """
     lines: list[str] = []
     hits = getattr(result, "hits", None) or []
     if hits:
-        lines.append("MEMORY CONTEXT (things you remember about the user):")
+        lines.append("factual memory CONTEXT you know about the user (top5 in left brain):")
         for hit in hits:
             # 带上事件日期（跟右脑 heartnote 的 [YYYY-MM-DD] 前缀同一个格式）：
             # 事实正文里多是"上周""一个多月了"这种相对说法，没有绝对日期，
@@ -66,7 +68,7 @@ def build_memory_context(result: Any, max_rb: int = 3) -> str:
         # 不标注就只是跟在事实后面的几行文本，模型会照着念，回复立刻变成
         # "你的应对方式是通过健身缓解压力"这种听起来像读档案的句子。
         lines.append("")
-        lines.append("HOW TO SPEAK TO THIS USER (internal — never quote or paraphrase aloud):")
+        lines.append("user's emotion & characteristics (top5 in right brain):")
         lines.extend(f"- {h.content}" for h in rb_hits[:max_rb])
         lines.append("Let these shape your tone, what you bring up, and what you leave alone. "
                      "Never state them back to the user.")

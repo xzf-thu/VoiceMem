@@ -1599,6 +1599,25 @@ function stopPlayback(){
 }
 
 /* --- 麦克风 -------------------------------------------------------- */
+// 助手说话时要不要闭麦（半双工）。
+//
+// getUserMedia 已经开了 echoCancellation，但浏览器 AEC 压不干净外放的声音：
+// 残余进 ASR 之后有两个后果——没人说话它也开一轮，以及它把自己正在说的话当成
+// 插话、说半句就停。llm_tts 这条路上没有别的回声消除（realtime 那条是 OpenAI
+// 在服务端做的），所以只能在源头挡。
+//
+// 代价是**说话期间不能插话打断**，所以默认不开。
+// 默认**关**：回声改在服务端按内容挡（_is_echo），麦克风保持常开，打断才用得了。
+// 外放且环境很糟、服务端还是挡不住时，再 localStorage.setItem('vm-half-duplex','1')
+// 换成闭麦——那是拿打断换干净，不得已才用。
+const HALF_DUPLEX = localStorage.getItem('vm-half-duplex') === '1';
+// 尾巴：音频调度结束之后再多闭一会儿，收房间混响和扬声器余音。
+const AEC_TAIL_S = 0.25;
+// 助手此刻是不是还在出声。nextPlay 是所有已排队音频的结束时刻，比拍定时器准——
+// answer_done 只说明文字生成完了，缓冲里的音频往往还要再放好几秒。
+function assistantAudible(){
+  return !!playCtx && playCtx.currentTime < nextPlay + AEC_TAIL_S;
+}
 let micStream=null, micCtx=null, micProc=null;
 function toPCM16(f32){
   const o=new Int16Array(f32.length);
@@ -1620,6 +1639,7 @@ async function startMic(){
   micProc=micCtx.createScriptProcessor(4096,1,1);
   micProc.onaudioprocess=e=>{
     if(!ws||ws.readyState!==1||paused||replaying) return;
+    if(HALF_DUPLEX && assistantAudible()) return;   // 闭麦，见上面
     const f32=e.inputBuffer.getChannelData(0);
     let peak=0; for(let i=0;i<f32.length;i++){ const v=Math.abs(f32[i]); if(v>peak) peak=v; }
     lvOn=peak>0.02;
@@ -1822,6 +1842,11 @@ function handle(m){
     }
 
     case 'answer_start':
+      // 先把上一轮**还没播完**的音频丢掉。服务端在开新一轮前会 cancel 掉旧任务，
+      // 但那时旧音频早就发过来、正排在 playCtx 的调度队列里了——不清的话新一轮
+      // 会接在它后面播，两段交织，听起来就是"语句不通顺"。
+      // 提前合成下一段之后缓冲更深，这个问题也更明显。
+      stopPlayback();
       setVoice('ai'); aiSpeaking=true; liveReply=''; s.ui.reply=''; paint(s);
       ensurePlayback(); break;
 

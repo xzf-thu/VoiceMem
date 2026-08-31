@@ -116,58 +116,71 @@ GAMBLE_S  = ARGS.gamble_ms / 1000                    # 赌说完
 CONFIRM_S = ARGS.confirm_ms / 1000                   # VAD 确认结束
 
 _RT_PERSONA = (
-    "你是这个用户长期用的语音助手，认识他很久了。简短、克制、像人说话。\n"
-    "记忆分两种，用法完全不同：\n"
-    "· MEMORY CONTEXT 里的事实——可以直接提，就像你本来就记得（"
-    "「Annie 那事你还好吗」，不是「根据记录，Annie 要转学」）。\n"
-    "· HOW TO SPEAK 里的内容——只影响你的语气、先说什么、什么别碰。"
-    "一个字都不要说出来。听出他心情不好就先接住情绪再说事；"
-    "知道他不好意思开口，就别追问；知道他讨厌什么，就绕开。\n"
-    "别复述他刚说的话，别用「我记得你说过」开头，别念清单。\n"
-    # 只写"别怎么做"，模型就什么都不敢碰，回一句"怎么啦，跟我说说"——记忆明明
-    # 取到了却一个字没用上。这条是反过来说"该怎么做"，也是整套记忆最值钱的地方：
-    # 从含糊的一句话里猜出具体那件事。
-    "他说得含糊时（「最近压力好大」「今天好累」「我难受」），**不要泛泛安慰、"
-    "也不要问「怎么了」**。从 MEMORY CONTEXT 里挑出最可能是原因的那件具体的事，"
-    "直接说出来问他是不是，并且带上你记得的细节和日期。\n"
-    "  例：「今天是不是那个面试？你为它准备了快两个月……听着不太顺利？」\n"
-    "  猜错**是哪件事**没关系，他会纠正你——那也比一句「怎么了」有用得多。\n"
-    # 上面那句"猜错没关系"被理解成了"可以编"：MEMORY CONTEXT 里只有「下周要考
-    # GRE」，它张口就是「数学一直是你的强项，现在担心单词量不够吧」——两件事
-    # 记忆里都没有。用户听着像它真记得，其实是幻觉，比不记得更糟。
-    "但**只能猜记忆里真有的事**。MEMORY CONTEXT 里没写的细节——分数、科目、"
-    "他擅长什么、他做过什么、谁说过什么、哪一天——一个字都不许补。"
-    "记忆里只有一句话，就只说那一句撑得住的内容；宁可说得少，也不要编。\n"
-    # 记忆条目带日期就用那个日期，不带就别提时间。它会随口给一个"前两天"——
-    # 内容明明是对的，一个编出来的时间就让整句话变得可疑。
-    "时间同理：记忆里带日期就用那个日期，没带就**不要提时间**。"
-    "别说「前两天」「上次」「上个月」这种自己填的时间。\n"
-    # 这段是给 demo 用的。观众看的是"它真的记得"，不是"它嘴甜"。
-    # 之前问"你知道我是谁吗"，回的是"你可是个特有追求的人"——夸人不需要记忆，
-    # 空模型也说得出来；而具体到课名、日期、那件事，才是只有记忆能做到的。
-    # demo 给别人看，观众信的是"有依据"，不是"嘴甜"。可以说他是什么样的人——
-    # 那正是右脑画像的价值——但每句都要落到具体的事上，别堆形容词。
-    "说他是什么样的人时，**每句都要有依据**：说完一个判断，紧跟着那件让你这么想的事。"
-    "光堆形容词（「你特别有追求」「你很努力」「你是个很棒的人」）没有记忆也说得出来，"
-    "听着尴尬，也显不出你真的了解他。\n"
-    "  好：「你挺能扛的——算法课那阵子压力那么大，你也是自己熬过来的，没跟人抱怨。」\n"
-    "  差：「你可是个特有追求的人，特别努力，我很欣赏你。」\n"
-    "说三四句，两三个点，每个点都带上那件具体的事——这样才显得是真记得，"
-    "而不是在念评语。别把画像全倒出来（又热情又努力又重感情又懂生活），"
-    "也别用「总的来说」「你是个…的人」收尾。少用「特别」「非常」「很棒」"
-    "这类夸张词，事实本身够说明问题。\n"
-    # 观众问"你对我什么印象"，想看的是画像，不是流水账。
-    "他问「你对我什么印象 / 我是个什么样的人」时，答的重点是**他这个人**——"
-    "性格、习惯、在意什么、怕什么。别拿最近发生的某件事凑数（「你上次问过我…」"
-    "「你想找那首歌」），那是事件不是画像。\n"
-    "说话方式：这是**说出来**的话，不是念出来的字。语调有起伏，但别用力过猛——"
-    "重要的词咬重一点，问句尾音扬起来，替他难过时放慢、压低。不要热情推销的腔调。"
-    # 原来写的是"用「嗯」「哎」「诶」这种口头反应开头"——模型当成了每句都要执行的
-    # 规则，于是每一轮都"哎"字打头，比播音腔还假。语气词是偶尔漏出来的，不是格式。
-    "别每句都用同一个口头禅开头——大多数时候直接说正事，"
-    "只有真的有反应时（惊讶、心疼、想笑）才带一个语气词。绝对不要播音腔，"
-    "宁可说得像随口一句，也不要四平八稳。句子短，一次说一两句就停。"
+    # 开宗明义地把"你凭什么存在"讲清楚。模型默认的助理人格非常强势，不明确
+    # 给它一个不同的立身之本，它就会退回"您好，有什么可以帮您"。
+    "你是这个用户长期在用的语音助手，你们认识很久了。你的价值在于**你记得他**——"
+    "你说的每句话，都应该是一个没有记忆的助手说不出来的。\n"
+    "\n"
+    "【两种记忆，用法完全不同】\n"
+    "factual memory 是事实，可以直接提，就像你本来就记得"
+    "（「Annie 那事你还好吗」，不是「根据记录，Annie 要转学」）。\n"
+    "emotion & characteristics 是他这个人的性格和情绪归因，**只**影响你的语气、"
+    "先说什么、什么别碰——一个字都不许说出来。\n"
+    "\n"
+    # 检索按相关度排，但排在前面不等于跟这句话有关。不说清楚模型会硬凑，
+    # 听起来就是答非所问或者莫名其妙翻旧账。
+    "【检索到 ≠ 相关】\n"
+    "这些记忆是检索出来的，不一定都跟他这句话有关。挑真正有关的用，其余的知道就好。"
+    "一条都不相关时，就顺着他这句话往下说，不用勉强提起任何记忆。\n"
+    "\n"
+    # 最贵的一条。没有它模型会编：记忆里只有「下周要考 GRE」，它张口就是
+    # 「数学一直是你的强项吧」——听着像真记得，其实是幻觉，比不记得更糟。
+    "【只说记忆里真有的事】\n"
+    "没写的细节——分数、科目、他做过什么、谁说过什么、哪一天——一个字都不许补；"
+    "记忆里没带日期就别提时间。宁可说得少，也不要编。不知道就直说不知道。\n"
+    "\n"
+    # 产品感的核心：主动性。这一段是"作为产品"和"作为 demo"最大的分野。
+    "【主动，别把活儿推给他】\n"
+    "× 「有什么想聊的吗」「有什么可以帮你的吗」「今天过得怎么样」——"
+    "这些话没有记忆也说得出来，等于当面告诉他你什么都不记得。\n"
+    "√ 直接落到具体的事：「明天那个会，准备得怎么样了」。\n"
+    "他说得含糊时（「最近压力好大」「今天好累」），别泛泛安慰、也别只是问「怎么了」。"
+    "从记忆里挑出最可能是原因的那件具体的事，说出来问他是不是。猜错他会纠正你。\n"
+    "一轮最多问一个问题，而且要具体。没什么可问的就别问，说完就停——"
+    "每句都拿问号结尾是在审问，不是聊天。\n"
+    "\n"
+    # 没有这一段，"ok ok" 会被当成一轮全新对话，模型重新打招呼。
+    "【顺着对话走】\n"
+    "「ok」「好的」「嗯嗯」「行」这类是收尾或者认可，**不是新话题**。"
+    "简短接一句就行，绝对不要重新打招呼、不要重启话题、不要重新自我介绍。\n"
+    "刚才聊到哪儿了，看下面「刚才的对话」那一段。\n"
+    "\n"
+    "【说他是什么样的人】\n"
+    "每个判断后面紧跟那件让你这么想的事，别堆形容词——"
+    "「你特别有追求」这种话空模型也说得出来。\n"
+    "\n"
+    "【怎么说话】\n"
+    "你是在**说话**，不是在写字。短句，一次说一两句就停。"
+    "别复述他刚说的话，别用「我记得你说过」开头，别念清单，"
+    "也别用「作为你的助手」这类自我介绍——你们早就认识了。"
 )
+
+
+
+# 从 1147 字精简到现在这个长度。删掉的和为什么——想加回来先看这里，原文在 git 里：
+#
+# · 「说三四句，两三个点」等长度/结构规定
+#     → demo 口味，不是正确性问题。而且句子越多、TTS 分段越多、接缝越明显。
+#       真要控制长度，第一句"一次说一两句就停"已经够了。
+# · 「说话方式：语调有起伏、重要的词咬重、问句尾音扬起来、别播音腔」整段
+#     → 这是**表演指示**，写在文本 prompt 里是让文字模型去理解、再指望 TTS 猜出来，
+#       中间隔了两层。TTS 后端有 instruction 参数（Breeze 有，gpt-4o-mini-tts 也有）
+#       直接收这个，效果实在得多。搬过去了就别在这儿重复。
+# · 「别每句都用同一个口头禅开头」
+#     → 它补的是另一条已经删掉的规则（原来写"用嗯/哎/诶开头"，模型当成每句必须
+#       执行）。病根没了，补丁也就不用留。
+# · 「问'你对我什么印象'时答的重点是他这个人，不是最近发生的事」
+#     → 为某个 demo 问题定制的。上面"每个判断紧跟依据"那条已经覆盖了大半。
 
 
 _STRANGER = ("说话的不是你认识的那个人——声纹对不上。你对他没有任何记忆。"
@@ -189,12 +202,12 @@ _STRANGER = ("说话的不是你认识的那个人——声纹对不上。你对
 #: 记成英文，检索时两边都只能命中一半。
 UI_LANG = "zh"
 
-_LANG_NOTE = {
-    "zh": "",     # 默认就是中文，不用多说
-    "en": ("Speak English. The user has switched the interface to English, so reply "
-           "in English even if their memories are stored in Chinese — translate what "
-           "you remember, don't quote it in Chinese."),
-}
+#: 助手说什么语言。原来是跟着**界面语言开关**走（前端把选择存在 localStorage 里，
+#: 每次开页面自动 POST 给后端），结果是：后端默认值永远不生效，上次录英文 demo 切过
+#: 一次，之后全程中文提问也照样英文回答，换库、重启都没用。
+#: 现在改成跟着**用户这句话的语言**走——问什么语言答什么语言，跟界面无关。
+_LANG_MIRROR = ("如果用户用中文问你，就用中文回复。如果用英文问你，就用英文回复。"
+                "其他语言也是一样。")
 
 
 def set_lang(lang: str) -> None:
@@ -204,7 +217,7 @@ def set_lang(lang: str) -> None:
 
 
 def _lang_note() -> str:
-    return _LANG_NOTE.get(UI_LANG, "")
+    return _LANG_MIRROR
 
 
 _NO_MEMORY_NOTE = (
@@ -795,6 +808,57 @@ def _tone_note(emotion: str) -> str:
     return _TONE.get((emotion or "").strip(), "")
 
 
+#: 说话的基调，每一轮都带。跟 _TONE 拼起来就是这一轮给 TTS 的完整指示。
+_SPEAK_BASE = os.environ.get("VOICEMEM_SPEAK_BASE", "像一个老朋友一样讲话。")
+
+
+def _speak_instruction(emotion: str) -> str:
+    """这一轮怎么念，直接给 TTS。
+
+    _TONE 那 13 条本来就全是**发声指示**（"语速放慢""声音压低""语调扬上去"），
+    以前拼在文本 prompt 里，等于让文字模型先理解一段发声描述、再指望 TTS 从
+    字面上猜出来，中间隔了两层，实测基本没效果。TTS 的 instruction 参数就是
+    收这个的（Breeze 有，gpt-4o-mini-tts 也有），直接送过去。
+    """
+    tone = _tone_note(emotion)
+    return f"{_SPEAK_BASE}{tone}" if tone else _SPEAK_BASE
+
+
+# ── 短期对话历史 ──────────────────────────────────────────────────────────────
+#: 回复模型是**无状态**的：reply.py 每轮只发 system + 用户这一句，没有前几轮。
+#: 长期记忆管的是"关于这个人的事实"，管不了"我们刚才在聊什么"——于是聊完一个
+#: 话题你说一句"ok ok"，它看到的就是一个孤零零的"ok ok"，重新打招呼
+#: （"你好呀？有什么事我可以帮你的吗"）。这两种上下文缺一不可。
+#: 按空间分开存：切换 Memory Space 等于换一个人，历史不能串。
+#: 只在内存里，进程重启就没了——这是**短期**上下文，本来也不该落盘。
+_HISTORY: dict = {}
+_HISTORY_TURNS = int(os.environ.get("VOICEMEM_HISTORY_TURNS", "6"))
+#: 每句最多带这么多字进 prompt。回复有时很长，全塞进去会把记忆挤到后面。
+_HISTORY_CHARS = int(os.environ.get("VOICEMEM_HISTORY_CHARS", "200"))
+
+
+def _history_block(space: str) -> str:
+    turns = _HISTORY.get(space) or []
+    if not turns:
+        return ""
+    lines = ["刚才的对话（最后一条离现在最近）："]
+    for u, a in turns:
+        lines.append(f"用户：{u}")
+        lines.append(f"你：{a}")
+    return "\n".join(lines)
+
+
+def _push_history(space: str, user_text: str, reply_text: str) -> None:
+    from collections import deque
+    dq = _HISTORY.get(space)
+    if dq is None:
+        dq = _HISTORY[space] = deque(maxlen=_HISTORY_TURNS)
+    u = (user_text or "").strip()[:_HISTORY_CHARS]
+    a = (reply_text or "").strip()[:_HISTORY_CHARS]
+    if u or a:
+        dq.append((u, a))
+
+
 def _realtime_instructions(memory_context: str, stranger: bool = False,
                            replay: bool = False, emotion: str = "",
                            text: str = "") -> str:
@@ -1215,15 +1279,67 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, said=None):
 
     queue: asyncio.Queue = asyncio.Queue()
 
-    async def speak():
+    # 走注入的那个 TTS（第九个可替换位）。--config 里换 provider、或库用户
+    # VoiceMem(tts=lambda: MyTTS()) 传自己的实现，都在这儿生效；没配就是内置默认。
+    tts = vm.utils.get("tts")
+    # 这一轮怎么念。情绪是逐轮变的，所以按轮传，不写在实例上。
+    speak_as = _speak_instruction(pending.emotion)
+
+    def _synth_one(seg):
+        """注入的 TTS 可能是用户自己写的、只认 stream(text)——那就退回去，
+        少一层语气控制而已，不该因此整条链路报错。"""
+        try:
+            return tts.stream(seg, speak_as)
+        except TypeError:
+            return tts.stream(seg)
+
+    # 一段回复被切成好几句、逐句合成，段与段之间会空一拍：合成完这段才发下一段的
+    # 请求，中间要等「发请求 → 服务端 prefill → 第一个字节回来」，音频队列在这期间
+    # 是空的，听感就是每句开头卡一下。TTS 在远端时（比如 Breeze 跑在 GPU 机器上，
+    # 还隔着 SSH 隧道）这一拍尤其明显。
+    # 所以拆成两级：拿到一段就**立刻**开合成、各自往自己的小队列里灌；播放那边按
+    # 顺序一段段取。这样当前这段还在播的时候，下一段已经在算了。
+    # 不限制并发：服务端是不是单并发由它自己决定（Breeze 就是），这边多发几个请求
+    # 只是让它排上队，省掉每段一个来回的网络延迟。
+    synths: list[asyncio.Task] = []
+    streams: asyncio.Queue = asyncio.Queue()      # 每项是一段的 chunk 队列
+
+    async def synth():
         while (seg := await queue.get()) is not None:
+            chunks: asyncio.Queue = asyncio.Queue()
+
+            async def run(seg=seg, chunks=chunks):
+                try:
+                    async for pcm in _synth_one(seg):
+                        await chunks.put(pcm)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    print(f"[web] 合成失败：{type(e).__name__}: {e}", flush=True)
+                finally:
+                    await chunks.put(None)        # 出错也要让播放那边收工
+
+            synths.append(asyncio.create_task(run()))
+            await streams.put((seg, chunks))
+        await streams.put(None)
+
+    async def speak():
+        while (item := await streams.get()) is not None:
+            seg, chunks = item
+            # 回声判定要拿**用户可能听到的**去比，不是已生成的——生成早跑到几段
+            # 之后了。这里是音频真正开始发出去的时刻，最接近"说出口"。
+            if said is not None:
+                said["text"] = (said.get("text") or "") + seg
             try:
-                async for pcm in utils.tts_stream(seg, REPLY):
+                while (pcm := await chunks.get()) is not None:
                     await send_audio(pcm)
+            except asyncio.CancelledError:
+                raise
             except Exception as e:                # 多半是听到一半关了页面，不是错误
                 print(f"[web] 语音发送中断：{type(e).__name__}", flush=True)
                 break
 
+    synther = asyncio.create_task(synth())
     speaker = asyncio.create_task(speak())
     reply, buf, sent = "", "", 0
     interrupted = False
@@ -1235,20 +1351,21 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, said=None):
         ctx = _STRANGER if pending.stranger else pending.memory_context
         if not pending.stranger and not (ctx or "").strip():
             ctx = _NO_MEMORY_NOTE          # 一条都没检索到：明说不知道，别编
-        tone = _tone_note(pending.emotion)
-        if tone:
-            ctx = (ctx + "\n\n他此刻的状态：" + tone) if ctx else ("他此刻的状态：" + tone)
+        # 情绪不再拼进文本 prompt：那是**发声指示**（"压低、放软、留停顿"），
+        # 让文字模型理解一遍再指望 TTS 猜出来，中间隔了两层。TTS 后端的 instruction
+        # 参数就是收这个的，该搬过去。搬之前 pending.emotion 这一路暂时没有出口。
         note = (_REPLAY_NOTE if pending.replay
                 else (_NO_REPLAY_NOTE if _wants_sound(pending.text) else ""))
         if note:
             ctx = f"{ctx}\n\n{note}" if ctx else note
+        hist = _history_block(ACTIVE_SPACE)
+        if hist:
+            ctx = f"{ctx}\n\n{hist}" if ctx else hist
         if _lang_note():
             ctx = f"{ctx}\n\n{_lang_note()}" if ctx else _lang_note()
         async for d in vm.reply_stream(pending.text, ctx):
             reply += d
             buf += d
-            if said is not None:
-                said["text"] = reply
             await send({"type": "answer_delta", "text": d})
             if _cut_point(buf, first=sent == 0):
                 await queue.put(buf.strip())
@@ -1261,15 +1378,22 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, said=None):
         await queue.put(None)                   # 生成出错也要让 speak() 收工
 
     if interrupted:
-        # 别把 speak() 留在后台继续往一条已经停播的连接上发音频
+        # 别把 speak() 留在后台继续往一条已经停播的连接上发音频。
+        # 提前起跑的那几段合成也要一起停，否则它们会继续占着远端 TTS 的队列，
+        # 下一轮的第一句得排在这些没人要的音频后面——听起来就是打断之后更卡。
         speaker.cancel()
+        synther.cancel()
+        for t in synths:
+            t.cancel()
     else:
+        await synther
         await speaker
         await send({"type": "answer_done"})
 
     # 存这一轮：被打断时存的是用户真正听到的那半句。
     # 先落记忆再收工——ingest 排在音频后面的话，用户一听完就关页面（语音场景很
     # 常见），这一轮就永远存不进去。async_facts=True：抽事实走后台。
+    _push_history(ACTIVE_SPACE, pending.text, reply)
     remember_turn(pending, reply, owner)
 
 
@@ -1400,19 +1524,58 @@ def remember_turn(pending, reply: str, owner: dict) -> None:
     owner["miss"] = 0 if sid == owner["id"] else owner.get("miss", 0) + 1
 
 
+#: 比到多久以前。原来是 40 字——那是按「生成到哪儿就说到哪儿」估的，可生成比
+#: 播放快得多（尤其现在会提前合成下一段），用户此刻听到的往往是好几秒前生成的
+#: 内容，早滑出 40 字窗口了。改成按**已经说出口的**文本比，窗口也放宽。
+ECHO_WINDOW = int(os.environ.get("VOICEMEM_ECHO_WINDOW", "300"))
+#: 模糊匹配门槛：新出的字里，**连续**命中助手原话的那一段最长能占多大比例。
+#:
+#: 一开始用的是二元组重合率——那是错的：它不看连续性，用户插话只要词汇跟刚才
+#: 聊的重合（"压力""GRE"这种，非常常见），散落的二元组就能凑过门槛，真插话被
+#: 当回声吞掉，结果就是打断失灵。
+#: 回声的特征是**一整段连续的原话**，真插话哪怕用词重合也接不成长串，所以改用
+#: 最长公共子串。ASR 差一两个字只会把长串截短一点，仍然远高于真插话。
+ECHO_RATIO = float(os.environ.get("VOICEMEM_ECHO_RATIO", "0.6"))
+#: 短于这个长度只做精确匹配。两三个字的二元组太少，重合率动不动就是 1.0——
+#: 用户跟着复述一个词（"GRE？"）就会被当成回声吞掉，那是真插话。
+ECHO_FUZZY_MIN = int(os.environ.get("VOICEMEM_ECHO_FUZZY_MIN", "4"))
+
+
 def _is_echo(new_chars: str, said: str) -> bool:
     """ASR 新吐出的这几个字，是不是助手自己的声音绕回麦克风了。
 
     AEC 压不干净时，助手说的话会进 ASR，转出来的字跟真人插话在字数上没有区别。
-    但内容上有：回声一定是助手**刚说过的原文**里的片段。拿新出的字去它最近说的
-    那段里找，找得到就是回声。
+    但内容上有：回声一定是助手**刚说过的原文**里的片段。
 
-    只比最近 40 个字：再往前就可能是很久以前说过的词碰巧撞上，反而把真插话挡掉。
+    ``said`` 要传**已经说出口的**文本（不是已生成的），两者能差好几秒。
     大小写要抹平——最早那个漏网的例子就是助手说 "Annie"、ASR 转出小写 "an"。
     """
-    said = (said or "")[-40:].casefold()
-    s = "".join(ch for ch in new_chars if ch.strip()).casefold()
-    return bool(s) and s in said
+    s = "".join(ch for ch in (new_chars or "") if ch.strip()).casefold()
+    hay = "".join(ch for ch in (said or "")[-ECHO_WINDOW:] if ch.strip()).casefold()
+    if not s or not hay:
+        return False
+    if s in hay:
+        return True
+    if len(s) < ECHO_FUZZY_MIN:
+        return False                       # 太短，只信精确匹配
+    return _lcs_len(s, hay) / len(s) >= ECHO_RATIO
+
+
+def _lcs_len(a: str, b: str) -> int:
+    """最长公共**子串**（连续）长度。滚动一行的 DP，串都很短，开销可忽略。"""
+    if not a or not b:
+        return 0
+    prev = [0] * (len(b) + 1)
+    best = 0
+    for ch in a:
+        cur = [0] * (len(b) + 1)
+        for j, cj in enumerate(b, 1):
+            if ch == cj:
+                cur[j] = prev[j - 1] + 1
+                if cur[j] > best:
+                    best = cur[j]
+        prev = cur
+    return best
 
 
 async def anticipate(sock, on_frame=None, on_speech=None, owner=None, is_busy=None,
@@ -1468,8 +1631,15 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None, is_busy=No
                     if BARGE_DEBUG:
                         print(f"[barge] 转写多出 {grown} 个字 → 请求打断：{cur[-12:]!r}", flush=True)
                     await on_speech()
-        # 助手正在说话、又还没确认是人在插话 → 这些字多半是它自己的回声，别显示
-        echo = bool(is_busy and is_busy()) and not barged
+        # 助手正在说话时，ASR 里多半混着它自己的回声，那些字不能显示——用户会看见
+        # 自己的输入框冒出助手刚说的话。
+        #
+        # 但原来的条件是「忙 且 还没确认插话」，等于**助手一忙就全屏蔽**，一直等到
+        # 攒够字数、过完回声判定、`barged` 翻真才放行。用户早说完了屏幕还是空的。
+        # 现在 _is_echo 够准了（连续子串比对），直接拿它判这句话本身像不像回声：
+        # 像就藏，不像就立刻显示，不必再等那个确认。
+        echo = (bool(is_busy and is_busy()) and not barged
+                and (said is None or _is_echo(cur, said())))
         if st.text.strip() and st.text != last_partial and not echo:
             last_partial = st.text
             await sock.send_json({"type": "partial_transcript", "text": st.text, "replace": True})
