@@ -1,7 +1,7 @@
 <a id="chinese"></a>
 
 <p align="center">
-  <img src="assets/Voicemem_logo.webp" alt="VoiceMem Logo" width="100%">
+  <img src="assets/logo.png" alt="VoiceMem Logo" width="100%">
 </p>
 
 <p align="center">
@@ -398,7 +398,7 @@ VoiceMem 基于 **Apache License 2.0** 开源。
 <a id="english"></a>
 
 <p align="center">
-  <img src="assets/Voicemem_logo.webp" alt="VoiceMem Logo" width="100%">
+  <img src="assets/logo.png" alt="VoiceMem Logo" width="100%">
 </p>
 
 <p align="center">
