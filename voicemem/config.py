@@ -72,7 +72,8 @@ def _bad(component: str, provider, known) -> None:
 
 
 def _embedding_factory(provider, cfg):
-    """embedding：local -> LocalE5Embedder；openai -> OpenAILocalEmbedder。"""
+    """embedding：local -> 本地 E5；openai -> OpenAILocalEmbedder；
+    其余名字转给 mem0 的 EmbedderFactory（ollama / huggingface / gemini / …）。"""
     if provider == "local":
         def make():
             from voicemem.leftbrain.local_e5_embedder import LocalE5Embedder
@@ -90,7 +91,20 @@ def _embedding_factory(provider, cfg):
                 dimensions=cfg.get("dimensions"),
             ))
         return make
-    _bad("embedding", provider, ["local", "openai"])
+
+    # 其余的交给 mem0——它自带十来个 provider（ollama / huggingface / gemini /
+    # bedrock / azure_openai / vertexai / together / lmstudio / fastembed /
+    # langchain），而 mem0 本来就是依赖，没必要各写一遍。
+    # 内置那两个不走这条：local 是 mem0 没有的本地 E5，openai 这边多支持
+    # dimensions 这类参数。
+    from voicemem.leftbrain.mem0_embedder import mem0_providers
+    known = mem0_providers()
+    if provider in known:
+        def make():
+            from voicemem.leftbrain.mem0_embedder import Mem0Embedder
+            return Mem0Embedder(provider, cfg)
+        return make
+    _bad("embedding", provider, ["local", "openai", *sorted(known)])
 
 
 def _slots_factory(provider, cfg):
