@@ -629,13 +629,34 @@ def ingest_voice_input(
                         attributed_to=orig.attributed_to,
                     ))
             elif r.event == "UPDATE" and r.memory_id and r.text:
-                if hasattr(repo, "update_memory"):
+                # UPDATE **默认当成 ADD**，不再改写旧记忆。
+                #
+                # 「这句话是在修正哪条旧记忆」本身就是个不可靠的判断，判错的代价
+                # （覆盖掉一条好记忆）远大于判对的收益（省一条重复）。实测 158 次
+                # UPDATE：34% 新旧一字不差（纯空转，却照样重算 embedding、把 LLM
+                # 判好的 slot 标签冲回向量版），11% 变短丢信息，还有把 ASR 噪音
+                # 写进旧记忆的（"提到正在考虑某个事情"→"提到自己有点慢慢…"），
+                # 甚至来回震荡（"下周三有安排"→更具体→又退回模糊）。
+                # 上游 mem0 的新版本也去掉了 update。
+                #
+                # 改成追加之后，重复记忆会变多——那交给去重/归档处理，那是**可以
+                # 事后修正**的问题；覆盖写造成的信息丢失事后修不回来。
+                # 需要旧行为：VOICEMEM_APPLY_UPDATE=1。
+                if os.environ.get("VOICEMEM_APPLY_UPDATE", "0") == "1" and hasattr(repo, "update_memory"):
                     # 带上本次会话日期：被更新的那条记忆讲的已经是这次说的事了，
                     # 时间戳必须跟着走，否则新事实会挂在被并那条的旧日期上。
-                    # user_id 传了才会重新跑认知图实体/关系抽取——之前 UPDATE
-                    # 事实完全不会进认知图，只有 ADD 会，见 update_memory 文档。
                     repo.update_memory(r.memory_id, r.text, session_id=session_id,
                                        observed_at=vi.begin_time, user_id=user_id)
+                else:
+                    # metadata 跟 ADD 分支一样从 fact_map 取，别让改写来的这条
+                    # 少掉 attributed_to（少了会被当成"未验证声纹"的防御路径）。
+                    orig = fact_map.get(r.text) or next(iter(fact_map.values()), None)
+                    if orig:
+                        from voicemem.leftbrain.extract_facts_openai import ExtractedAdditiveMemory
+                        to_add.append(ExtractedAdditiveMemory(
+                            local_id=r.memory_id, text=r.text,
+                            attributed_to=orig.attributed_to,
+                        ))
             elif r.event == "DELETE" and r.memory_id:
                 if hasattr(repo, "delete_memory"):
                     repo.delete_memory(r.memory_id)
