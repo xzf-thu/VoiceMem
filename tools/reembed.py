@@ -24,12 +24,19 @@ def main() -> None:
         print(f"找不到 {db}")
         return
 
-    from voicemem.core import VoiceMem
-    cfg = {"mode": "text_mode", "space": space}
+    # 只建 embedder，不建整个 VoiceMem——后者会打开向量库，跟正在跑的服务抢
+    # qdrant 的文件锁（"Storage folder ... already accessed by another instance"）。
+    # 迁移改的是 sqlite 里的向量列，跟向量库无关。
     if "--local" in sys.argv:                     # 跟 web demo 的配置对齐
-        cfg |= {"embedding": {"provider": "local"}, "slots": {"provider": "local"}}
-    vm = VoiceMem.from_config(cfg)
-    embed = vm._o._embed_text
+        from voicemem.leftbrain.local_e5_embedder import LocalE5Embedder
+        e = LocalE5Embedder()
+        embed = e.embed_query_text
+    else:
+        from voicemem.leftbrain.local_memory_store import (
+            OpenAILocalEmbedder, OpenAILocalEmbedderConfig,
+        )
+        e = OpenAILocalEmbedder(OpenAILocalEmbedderConfig())
+        embed = lambda t: e.embed_texts([t])[0]
     want = len(embed("维度探针"))
     print(f"{space}: 当前 embedder 输出 {want} 维")
 

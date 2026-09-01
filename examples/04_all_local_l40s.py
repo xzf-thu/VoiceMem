@@ -26,6 +26,24 @@ VLLM = {"model": "Qwen/Qwen3-8B", "api_key": "EMPTY",
 # 用 VOICEMEM_TTS_MODEL 指向 voice 的 .onnx）。
 TTS = {"tts": {"provider": "voxcpm"}}
 
+# embedding 的 provider 有三类来源，一份配置管所有通道（记忆向量、slot 锚点、
+# 实体去重、右脑判断表）：
+#   local        本地 E5（multilingual-e5-small）。0 网络、约 10ms——实时语音只能
+#                用这一类，投机预取那点时间预算里发不起 HTTP。
+#   openai       OpenAI 或任何兼容端点。认 base_url，所以 TEI / vLLM 也走这个：
+#                  {"provider": "openai", "config": {"model": "BAAI/bge-m3",
+#                   "base_url": "http://127.0.0.1:8080/v1", "api_key": "EMPTY"}}
+#   其余名字     转给 mem0 的 EmbedderFactory：ollama / huggingface / gemini /
+#                aws_bedrock / azure_openai / vertexai / together / lmstudio /
+#                fastembed / langchain。config 原样透传给 mem0：
+#                  {"provider": "ollama", "config": {"model": "nomic-embed-text",
+#                   "ollama_base_url": "http://127.0.0.1:11434"}}
+#
+# 换 embedder 要注意两件事：
+#   · 选跟你语言匹配的模型。all-MiniLM-L6-v2 那种纯英文模型做中文检索**不报错、
+#     只是全错**（实测"我在哪读书"第一条返回"对坚果过敏"），最难查的一类问题。
+#   · 库里的老向量维度会对不上，被跳过时有警告，右脑检索和实体去重在重新 embed
+#     之前是空的：python3 tools/reembed.py <space> --apply
 vm = VoiceMem.from_config({
     "mode": "normal",
     "embedding": {"provider": "local"},                # 记忆向量：本地 E5
