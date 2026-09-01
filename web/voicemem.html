@@ -191,6 +191,10 @@ button{cursor:pointer;background:none;border:none}
 .chat .said{font-size:14.5px;line-height:1.65;white-space:pre-wrap;word-break:break-word}
 .chat .turn.user .said{background:#303030;padding:10px 15px;border-radius:18px;border-bottom-right-radius:6px}
 .chat .turn.ai .said{color:var(--txt)}
+.chat .turn.ai.streaming .said::after{content:'';display:inline-block;width:2px;height:1em;
+  margin-left:4px;vertical-align:-2px;border-radius:1px;background:var(--blue);
+  animation:stream-caret .8s steps(1,end) infinite}
+@keyframes stream-caret{50%{opacity:.18}}
 .chat .empty{margin:auto;text-align:center;color:var(--txt-3);font-size:13.5px;line-height:1.9}
 .chat .empty b{display:block;font-weight:500;font-size:15px;color:var(--txt-2);margin-bottom:4px}
 
@@ -1249,6 +1253,13 @@ function renderSessions(){
     li.append(t,n); ul.appendChild(li);
   }
 }
+// Preserve the active caption draft across chat re-renders.
+var liveChatDraft=null, spokenCaption=null;
+function restoreLiveChatDraft(s){
+  if(!s||!spokenCaption||!spokenCaption.active||spokenCaption.session!==s) return;
+  beginLiveChatDraft(s);
+  paintLiveChatDraft(spokenCaption.shown||'');
+}
 function renderChat(){
   const s=currentSession();
   $('chatTitle').textContent=s?s.title:i18n('newChat');
@@ -1258,7 +1269,7 @@ function renderChat(){
   if(!s||!s.turns.length){
     const e=document.createElement('div'); e.className='empty';
     e.innerHTML=i18n('startHint', SPACES[s?s.space:activeSpace].name);
-    box.appendChild(e); return;
+    box.appendChild(e); restoreLiveChatDraft(s); return;
   }
   for(const turn of s.turns){
     const w=document.createElement('div');
@@ -1268,6 +1279,7 @@ function renderChat(){
     const said=document.createElement('div'); said.className='said'; said.textContent=turn.text;
     w.append(who,said); box.appendChild(w);
   }
+  restoreLiveChatDraft(s);
   box.scrollTop=box.scrollHeight;
 }
 function chip(kind,label,val){
@@ -1569,30 +1581,95 @@ const SAMPLE_RATE=24000;          // 必须和 run.py 的 MIC_RATE 一致
 let ws=null, live=false, paused=false;
 
 /* --- 播放 ---------------------------------------------------------- */
-/* 浏览器只允许在用户手势里启动 AudioContext。等第一块音频到了才 new 的话，
-   建出来就是 suspended，之后 resume() 也救不回来——表现是"回复没声音"。
-   所以 ensurePlayback() 必须在"开始对话"那个 click 里被调到。 */
-let playCtx=null, scheduled=[], nextPlay=0;
-const PREBUFFER=0.08;
+/* Continuous PCM playback with adaptive jitter buffering. */
+let playCtx=null, pcmNode=null, pcmReady=null, pcmPending=[], pcmDrainPending=false;
+let pcmStreaming=false, pcmDrainWaiters=[], pcmPrebuffer=0.08, pcmWorkletFailed=false;
+let scheduled=[], nextPlay=0;             // 只给“回放原始录音”这类完整 AudioBuffer 用
+
+function resolvePcmDrain(){
+  pcmStreaming=false;
+  for(const done of pcmDrainWaiters.splice(0)) done();
+}
+function configurePcmPlayer(){
+  if(pcmNode) pcmNode.port.postMessage({type:'config',prebuffer:pcmPrebuffer});
+}
+function initPcmPlayer(){
+  if(pcmReady||!playCtx) return pcmReady;
+  if(!playCtx.audioWorklet){ pcmWorkletFailed=true; return Promise.resolve(); }
+  pcmReady=playCtx.audioWorklet.addModule('/pcm-player-worklet.js').then(()=>{
+    pcmNode=new AudioWorkletNode(playCtx,'voicemem-pcm-player',{outputChannelCount:[1]});
+    pcmNode.connect(playCtx.destination);
+    pcmNode.port.onmessage=e=>{
+      const m=e.data||{};
+      if(m.type==='started') setSpokenCaptionPlaying(true);
+      else if(m.type==='drained'){
+        setSpokenCaptionPlaying(false);
+        resolvePcmDrain();
+      }else if(m.type==='underflow'){
+        setSpokenCaptionPlaying(false);
+        if(window.VM_DEBUG) console.debug('[audio] 自适应缓冲',m.targetMs+'ms');
+      }
+    };
+    configurePcmPlayer();
+    for(const f32 of pcmPending.splice(0)) enqueuePcm(f32);
+    if(pcmDrainPending){ pcmDrainPending=false; pcmNode.port.postMessage({type:'drain'}); }
+  }).catch(e=>{
+    pcmWorkletFailed=true; pcmReady=null;
+    console.warn('[audio] AudioWorklet 不可用，回退到旧播放器',e);
+    for(const f32 of pcmPending.splice(0)) legacyPlayPcm(f32);
+    if(pcmDrainPending){ pcmDrainPending=false; resolvePcmDrain(); }
+  });
+  return pcmReady;
+}
 function ensurePlayback(){
-  if(!playCtx) playCtx=new (window.AudioContext||window.webkitAudioContext)();
+  if(!playCtx){
+    playCtx=new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
+    initPcmPlayer();
+  }
   if(playCtx.state==='suspended') playCtx.resume();
   return playCtx;
 }
-function playPcm(buf){
-  ensurePlayback();
-  // PCM16 一个样本 2 字节；奇数长度直接 new Int16Array 会抛 RangeError
-  if(buf.byteLength<2) return;
-  const even=buf.byteLength-(buf.byteLength%2);
-  const i16=new Int16Array(buf,0,even/2), f32=new Float32Array(i16.length);
-  for(let i=0;i<i16.length;i++) f32[i]=i16[i]/32768;
-  const b=playCtx.createBuffer(1,f32.length,SAMPLE_RATE); b.copyToChannel(f32,0);
+function legacyPlayPcm(f32){
+  if(!playCtx||!f32.length) return;
+  const b=playCtx.createBuffer(1,f32.length,playCtx.sampleRate); b.copyToChannel(f32,0);
   const s=playCtx.createBufferSource(); s.buffer=b; s.connect(playCtx.destination);
-  scheduled.push(s);
-  const now=playCtx.currentTime, at=nextPlay>now?nextPlay:now+PREBUFFER;
+  scheduled.push(s); s.onended=()=>{ const i=scheduled.indexOf(s); if(i>=0) scheduled.splice(i,1); };
+  const now=playCtx.currentTime, at=nextPlay>now?nextPlay:now+pcmPrebuffer;
   s.start(at); nextPlay=at+b.duration;
 }
+function enqueuePcm(f32){
+  if(!pcmNode){ pcmPending.push(f32); return; }
+  pcmNode.port.postMessage({type:'audio',samples:f32},[f32.buffer]);
+}
+function playPcm(buf){
+  const ctx=ensurePlayback();
+  if(buf.byteLength<2) return;
+  const even=buf.byteLength-(buf.byteLength%2);
+  const i16=new Int16Array(buf,0,even/2), native=new Float32Array(i16.length);
+  for(let i=0;i<i16.length;i++) native[i]=i16[i]/32768;
+  // Match PCM samples to the AudioContext rate.
+  const f32=ctx.sampleRate===SAMPLE_RATE?native:resampleLinear(native,SAMPLE_RATE,ctx.sampleRate);
+  pcmStreaming=true;
+  if(pcmWorkletFailed) legacyPlayPcm(f32); else enqueuePcm(f32);
+}
+function finishPcmStream(){
+  if(pcmWorkletFailed){ resolvePcmDrain(); return; }
+  if(pcmNode) pcmNode.port.postMessage({type:'drain'}); else pcmDrainPending=true;
+}
+function waitForPcmDrain(maxMs=20000){
+  if(!pcmStreaming) return Promise.resolve();
+  return new Promise(resolve=>{
+    let done=false;
+    const finish=()=>{ if(done)return; done=true; clearTimeout(timer); resolve(); };
+    const timer=setTimeout(finish,maxMs);
+    pcmDrainWaiters.push(finish);
+  });
+}
 function stopPlayback(){
+  setSpokenCaptionPlaying(false);
+  pcmPending.length=0; pcmDrainPending=false;
+  if(pcmNode) pcmNode.port.postMessage({type:'clear'});
+  resolvePcmDrain();
   for(const s of scheduled.splice(0)){ try{ s.stop(); }catch(e){} }
   releaseMic();                 // 回放被打断，麦克风不该还被挂着
   if(playCtx) nextPlay=playCtx.currentTime;
@@ -1630,13 +1707,23 @@ function downsample(f32,from,to){
   for(let i=0;i<out.length;i++) out[i]=f32[Math.floor(i*ratio)];
   return out;
 }
+function resampleLinear(f32,from,to){
+  if(from===to) return f32;
+  const ratio=from/to, out=new Float32Array(Math.max(1,Math.round(f32.length/ratio)));
+  for(let i=0;i<out.length;i++){
+    const p=i*ratio, a=Math.floor(p), b=Math.min(a+1,f32.length-1), t=p-a;
+    out[i]=f32[a]*(1-t)+f32[b]*t;
+  }
+  return out;
+}
 async function startMic(){
   micStream=await navigator.mediaDevices.getUserMedia(
     {audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
   if(!micCtx) micCtx=new (window.AudioContext||window.webkitAudioContext)();
   if(micCtx.state==='suspended') await micCtx.resume();
   const src=micCtx.createMediaStreamSource(micStream);
-  micProc=micCtx.createScriptProcessor(4096,1,1);
+  // Smaller capture blocks reduce uplink latency.
+  micProc=micCtx.createScriptProcessor(2048,1,1);
   micProc.onaudioprocess=e=>{
     if(!ws||ws.readyState!==1||paused||replaying) return;
     if(HALF_DUPLEX && assistantAudible()) return;   // 闭麦，见上面
@@ -1801,13 +1888,109 @@ function rightNodesOf(hits){
 }
 
 /* --- 消息处理 ------------------------------------------------------ */
-let liveReply='';
+let liveReply='', pendingMemoryClip='';
+let replyPlaybackGeneration=0;
+spokenCaption={session:null,target:'',shown:'',index:0,budget:0,playing:false,
+               active:false,frame:0,lastAt:0};
+function beginLiveChatDraft(s){
+  if(!s||s!==currentSession()) return;
+  const box=$('chatLog');
+  const empty=box.querySelector('.empty'); if(empty) empty.remove();
+  if(liveChatDraft&&liveChatDraft.wrap.isConnected) liveChatDraft.wrap.remove();
+  const wrap=document.createElement('div'); wrap.className='turn ai streaming';
+  const who=document.createElement('div'); who.className='who'; who.textContent='VoiceMem';
+  const said=document.createElement('div'); said.className='said'; said.textContent='';
+  wrap.append(who,said); box.appendChild(wrap); box.scrollTop=box.scrollHeight;
+  liveChatDraft={sessionId:s.id,wrap,said,box};
+}
+function paintLiveChatDraft(text){
+  const draft=liveChatDraft;
+  if(!draft||!draft.wrap.isConnected) return;
+  draft.said.textContent=text;
+  draft.box.scrollTop=draft.box.scrollHeight;
+}
+function paintSpokenCaption(text){
+  const s=spokenCaption.session;
+  if(s){
+    s.ui.reply=text;
+    if(s===currentSession()){
+      const rp=$('reply');
+      rp.textContent=text||i18n('noReplyYet');
+      rp.classList.toggle('idle',!text);
+    }
+  }
+  paintLiveChatDraft(text);
+}
+function finishLiveChatDraft(s,text){
+  if(spokenCaption&&spokenCaption.session===s) spokenCaption.active=false;
+  if(liveChatDraft&&liveChatDraft.sessionId===s.id) liveChatDraft=null;
+  if(text) addTurn(s,'ai',text); else if(s===currentSession()) renderChat();
+}
+function captionCost(ch){
+  if(/[\u3400-\u9fff\uf900-\ufaff]/.test(ch)) return 1;
+  if(/[。！？!?]/.test(ch)) return 1.15;
+  if(/[，、；;：:,.]/.test(ch)) return .55;
+  if(/\s/.test(ch)) return .16;
+  return .34;                              // 拉丁字母按“词”而不是逐字等长计时
+}
+function resetSpokenCaption(s){
+  if(spokenCaption.frame) cancelAnimationFrame(spokenCaption.frame);
+  spokenCaption={session:s,target:'',shown:'',index:0,budget:0,playing:false,
+                 active:true,frame:0,lastAt:performance.now()};
+  paintSpokenCaption('');
+}
+function setSpokenCaptionTarget(text){
+  spokenCaption.target=text||'';
+  if(spokenCaption.playing) scheduleSpokenCaption();
+}
+function setSpokenCaptionPlaying(playing){
+  spokenCaption.playing=!!playing;
+  spokenCaption.lastAt=performance.now();
+  if(playing) scheduleSpokenCaption();
+  else if(spokenCaption.frame){ cancelAnimationFrame(spokenCaption.frame); spokenCaption.frame=0; }
+}
+function scheduleSpokenCaption(){
+  if(!spokenCaption.frame&&spokenCaption.playing)
+    spokenCaption.frame=requestAnimationFrame(stepSpokenCaption);
+}
+function stepSpokenCaption(now){
+  spokenCaption.frame=0;
+  if(!spokenCaption.playing) return;
+  const dt=Math.min(.12,Math.max(0,(now-spokenCaption.lastAt)/1000));
+  spokenCaption.lastAt=now;
+  // Weight punctuation and Latin text to approximate spoken pacing.
+  spokenCaption.budget+=dt*5.2;
+  const chars=Array.from(spokenCaption.target);
+  let changed=false;
+  while(spokenCaption.index<chars.length){
+    const cost=captionCost(chars[spokenCaption.index]);
+    if(spokenCaption.budget<cost) break;
+    spokenCaption.budget-=cost;
+    spokenCaption.index++; changed=true;
+  }
+  if(changed){
+    spokenCaption.shown=chars.slice(0,spokenCaption.index).join('');
+    paintSpokenCaption(spokenCaption.shown);
+  }
+  scheduleSpokenCaption();
+}
+function completeSpokenCaption(text){
+  setSpokenCaptionPlaying(false);
+  spokenCaption.target=text||spokenCaption.target;
+  spokenCaption.shown=spokenCaption.target;
+  spokenCaption.index=Array.from(spokenCaption.target).length;
+  paintSpokenCaption(spokenCaption.shown);
+  return spokenCaption.shown;
+}
 function handle(m){
   if(window.VM_DEBUG) console.log('[vm]', m.type, m);
   const s=currentSession();
   if(!s){ console.warn('[vm] 收到 '+m.type+' 但当前没有会话，丢弃'); return; }
   switch(m.type){
     case 'session_ready':
+      // Chained TTS uses a larger initial jitter buffer.
+      pcmPrebuffer=m.mode==='realtime'?0.08:0.16;
+      configurePcmPlayer();
       toast(i18n('connected', m.mode||'')); break;
 
     case 'partial_transcript':
@@ -1847,16 +2030,30 @@ function handle(m){
       // 会接在它后面播，两段交织，听起来就是"语句不通顺"。
       // 提前合成下一段之后缓冲更深，这个问题也更明显。
       stopPlayback();
+      replyPlaybackGeneration++;
       setVoice('ai'); aiSpeaking=true; liveReply=''; s.ui.reply=''; paint(s);
+      beginLiveChatDraft(s);
+      resetSpokenCaption(s);
       ensurePlayback(); break;
 
     case 'answer_delta':
-      liveReply+=m.text; s.ui.reply=liveReply; paint(s); break;
+      // Advance both captions on the playback clock.
+      liveReply+=m.text;
+      setSpokenCaptionTarget(liveReply); break;
 
     case 'answer_done':
-      aiSpeaking=false; setVoice('idle');
-      if(liveReply) addTurn(s,'ai',liveReply);
+      finishPcmStream();
+      const playbackGeneration=replyPlaybackGeneration;
+      const completedReply=liveReply;
       liveReply='';
+      const memoryClip=pendingMemoryClip; pendingMemoryClip='';
+      waitForPcmDrain().then(()=>{
+        if(playbackGeneration!==replyPlaybackGeneration) return;
+        completeSpokenCaption(completedReply);
+        finishLiveChatDraft(s,completedReply);
+        aiSpeaking=false; setVoice('idle');
+        if(memoryClip) playMemoryClip(memoryClip);
+      });
       titleFor(s);
       // 事实和图谱是后台线程写的（async_facts=True）。实测一轮要 15.9s——抽事实
       // 那次 LLM 往返本身就占大头，触发巩固的那轮更久。定死几个时间点去刷新
@@ -1866,6 +2063,12 @@ function handle(m){
       break;
 
     case 'answer_interrupt':
+      replyPlaybackGeneration++;
+      const heardReply=spokenCaption.shown;
+      setSpokenCaptionPlaying(false);
+      paintSpokenCaption(heardReply);
+      finishLiveChatDraft(s,heardReply);
+      liveReply='';
       stopPlayback(); aiSpeaking=false; setVoice('user'); break;
 
     case 'tag_update': {
@@ -1877,7 +2080,8 @@ function handle(m){
     }
 
     case 'play_memory':
-      playMemoryClip(m.memory_id); break;
+      // Defer memory playback until the reply audio drains.
+      pendingMemoryClip=m.memory_id||''; break;
 
     case 'error':
       toast(m.message||i18n('backendGone')); break;

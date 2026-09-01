@@ -247,6 +247,11 @@ def build_app(mode, session, classify, snapshot=None, audio_of=None, spaces=None
     # no-store：demo_local 也占 8787，同源缓存会让浏览器端出上一个 demo 的旧页面
     _NOCACHE = {"Cache-Control": "no-store"}
 
+    @app.get("/pcm-player-worklet.js")
+    def pcm_player_worklet():
+        return FileResponse(HERE / "pcm-player-worklet.js", headers=_NOCACHE,
+                            media_type="application/javascript")
+
     @app.get("/")
     def index():
         return FileResponse(HERE / "voicemem.html", headers=_NOCACHE)
