@@ -20,7 +20,14 @@ def new_id() -> str:
 
 
 def cosine(a: list[float], b: list[float]) -> float:
-    """Cosine similarity between two equal-length vectors. 0.0 if either is a zero vector."""
+    """Cosine similarity between two equal-length vectors. 0.0 if either is a zero vector.
+
+    长度不等返回 0.0。原来直接 ``zip`` 会**静默截断**到较短的那个——换 embedder
+    之后库里新旧维度并存（384 / 1536），比出来的是前 384 维的无意义数值，
+    不崩也不报错，实体去重就照着这个数乱合并。宁可判成"不相似"。
+    """
+    if len(a) != len(b):
+        return 0.0
     dot = sum(x * y for x, y in zip(a, b))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(x * x for x in b))

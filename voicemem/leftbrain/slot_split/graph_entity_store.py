@@ -21,6 +21,9 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
+#: 维度不符只提醒一次，别每轮刷屏。
+_WARNED_DIM: set = set()
+
 from voicemem.utils.common._graph_common import cosine as _cosine, new_id as _new_id, utc_iso as _utc_iso
 
 DEFAULT_MATCH_THRESHOLD = 0.65
@@ -204,12 +207,21 @@ class GraphEntityStore:
         """在同一 slot 下找语义最相似的 entity，相似度不够则返回 None。"""
         best: GraphEntity | None = None
         best_sim = -1.0
+        mismatched = 0
         for ent in self.get_entities_for_slot(user_id, slot_ref):
             if ent.embedding is None:
+                continue
+            if len(ent.embedding) != len(embedding):
+                mismatched += 1          # 换过 embedder，老向量维度对不上
                 continue
             sim = _cosine(embedding, ent.embedding)
             if sim > best_sim:
                 best_sim, best = sim, ent
+        if mismatched and not _WARNED_DIM:
+            _WARNED_DIM.add(1)
+            print(f"[GraphEntity] ⚠ {mismatched} 个实体向量的维度跟当前 embedder 不符，"
+                  "已跳过——换过 embedder 之后老向量作废，语义去重会失效。"
+                  "重新 embed 一遍或清掉这些向量。", flush=True)
         return best if best is not None and best_sim >= threshold else None
 
     def get_or_create_entity_semantic(

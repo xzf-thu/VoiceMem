@@ -39,6 +39,9 @@ MERGE_THRESHOLD = 0.95
 
 #: 五个 slot。去掉了原来的「人物地点态度」——它存的是话题（手冲咖啡/NUS/佳琪），
 #: 本来就该在左脑，也正是「佳琪 ×52」那个大杂烩的来源。
+#: 维度不符只提醒一次，别每轮刷屏。
+_WARNED_DIM: set = set()
+
 SLOTS = ("情绪", "应对方式", "表达风格", "思维模式", "喜好与厌恶")
 
 #: 五个 slot → UI 的三类
@@ -246,12 +249,18 @@ class TraitStore:
         with self._conn() as c:
             rows = c.execute("SELECT * FROM rb_traits WHERE user_id=? AND embedding IS NOT NULL",
                              (user_id,)).fetchall()
-            scored = []
+            scored, stale = [], 0
             for r in rows:
                 v = np.frombuffer(r["embedding"], dtype=np.float32)
                 if v.shape != q.shape:
+                    stale += 1           # 换过 embedder，老向量维度对不上
                     continue
                 scored.append((float(v @ q), r))
+            if stale and not _WARNED_DIM:
+                _WARNED_DIM.add(1)
+                print(f"[RBTraits] ⚠ {stale} 条判断的向量维度跟当前 embedder 不符，"
+                      "已跳过——换过 embedder 之后老向量作废，右脑检索会静默变空。"
+                      "重新 embed 一遍即可。", flush=True)
             scored.sort(key=lambda t: -t[0])
             return [(self._to_trait(c, r), s) for s, r in scored[:top_k]]
 
