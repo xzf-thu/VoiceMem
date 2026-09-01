@@ -290,6 +290,11 @@ _SOURCE_QUOTA = {
     # 名额留着只为老库里那些还能被显示层认出来；想看老数据设成 1。
     "response_experience": max(0, int(os.environ.get("VOICEMEM_RB_RESPONSE_MAX", "0"))),
     "profile": max(0, int(os.environ.get("VOICEMEM_RB_PROFILE_MAX", "3"))),
+    # heartnote 也要限席。它的 priority 跟**锚点新鲜度**走，刚存下的最强——于是
+    # 连着问三句，第三句的右脑栏里全是自己前两句问过的原话
+    # （"Emotional note: 你能说说对我的印象吗"），一条对这个人的判断都挤不进来。
+    # 刚说过的话天然打得过沉淀下来的画像，所以必须限。
+    "situation_pattern": max(0, int(os.environ.get("VOICEMEM_RB_HEARTNOTE_MAX", "2"))),
 }
 
 
