@@ -56,6 +56,9 @@
 
 * 💬 **09/01/2026 · v0.0.2** — 提升对话连续性，优化右脑画像呈现与记忆结构。
 * 🎉 **08/27/2026 · v0.0.1** — 发布初代 **VoiceMem** 和 **Technical Report**。
+* 🤖 **08/21/2026** — 开源 **VoiceMem 模型系列**（Qwen2.5-Omni / Qwen3-Omni / Step-Audio2-Mini），可直接读取并理解 VoiceMem 提供的记忆。
+* 🛠️ **08/21/2026** — 发布 **VoiceMem Utils**，打包全部默认本地模型，开箱即用。
+* 📦 **08/20/2026** — 开源 **ChatMem-400K** 数据集，由三阶段 OPD 流程构建。
 
 ## 🎬 Demo
 
@@ -449,6 +452,9 @@ A quick overview of VoiceMem:
 
 * 💬 **09/01/2026 · v0.0.2** — Improved conversational continuity; refined right-brain profile presentation and memory structure.
 * 🎉 **08/27/2026 · v0.0.1** — Released the first version of **VoiceMem** and our **Technical Report**.
+* 🤖 **08/21/2026** — Open-sourced the **VoiceMem model family** (Qwen2.5-Omni / Qwen3-Omni / Step-Audio2-Mini), able to read and use the memory VoiceMem provides.
+* 🛠️ **08/21/2026** — Released **VoiceMem Utils**, all default local models packaged for out-of-the-box use.
+* 📦 **08/20/2026** — Open-sourced **ChatMem-400K**, built with a three-stage OPD pipeline.
 
 ## 🎬 Demo Video
 
