@@ -88,6 +88,12 @@ from voicemem.leftbrain.local_memory_store import (
 )
 
 
+def _as_date(v) -> str:
+    """取 YYYY-MM-DD；不是日期就返回 ""（时刻、None、乱码都算不是）。"""
+    s = str(v or "")[:10]
+    return s if len(s) == 10 and s[:4].isdigit() and s[4] == "-" else ""
+
+
 def _resolve_chat_model() -> str:
     return (os.environ.get("OPENAI_MODEL") or "").strip() or "gpt-4o-mini"
 
@@ -420,12 +426,17 @@ class Mem0BackendStore:
             # 排除掉，time_start 又嵌在 metadata 里没摊平，于是时间一路存到了库里
             # 却从没到过 prompt，时序类问题全靠事实正文里碰巧出现的日期。
             inner = e.get("metadata") or {}
-            observed = str(inner.get("time_start") or e.get("created_at") or "")[:10]
+            # time_start 存的常常是**时刻**（"15:18:36"）而不是日期。原来写的是
+            # `time_start or created_at`——时刻是真值，`or` 直接短路，兜底那半永远
+            # 轮不到；再被 isdigit() 挡掉，于是 observed_at 恒为 ""。后果有两个：
+            # 检索排序的时间权重从未生效，记忆的 [日期] 前缀也从未进过 prompt
+            # （而人设里写着"记忆里带日期就用那个日期"）。所以要先校验像不像日期。
+            observed = _as_date(inner.get("time_start")) or _as_date(e.get("created_at"))
             hits.append(MemorySearchHit(
                 memory_id=mid, text=text, score=cos + bonus,
                 attributed_to=str(e.get("attributed_to") or "user"),
                 metadata=metadata, base_score=cos, time_boost=time_hit,
-                observed_at=observed if observed[:4].isdigit() else "",
+                observed_at=observed,
             ))
 
         hits.sort(key=lambda h: h.base_score, reverse=True)
