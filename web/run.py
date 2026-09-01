@@ -2017,19 +2017,62 @@ LB_ENTRIES_PER_SLOT = int(os.environ.get("VOICEMEM_LB_GRAPH_PER_SLOT", "7"))
 # 异步 + 缓存：memory_snapshot 是同步的，不能在里面等一次 LLM 往返。所以第一次
 # 显示原文，后台改写完落进缓存，前端下一次轮询（watchMemories 本来就在轮）就换成
 # 人话。改写只碰措辞，不新增任何事实。
+#: 这个空间的主人叫什么。右脑那些话是**关于他**的，一律写"他"就少了那份认得他的
+#: 感觉——"Jiaqi 一紧张就闷声不响"和"他一紧张就闷声不响"，前者才像认识他。
+#: 名字来自声纹注册表（自报"我叫X"时绑定的），读不到就回落到"他"。
+_OWNER_NAME_CACHE: dict = {}
+#: 疑问词。"我叫什么名字？"被当成自我介绍绑进去过，registry 里真的躺着一条
+#: name="什么名字"（见 voiceprint/speaker_identity.py 顶上那段）。显示前挡一道。
+_BAD_NAME_CHARS = "什谁哪啥吗呢么?？"
+
+
+def owner_name(space: str = "") -> str:
+    """这个空间主人的名字；认不出来就返回 ""（调用方自己回落到"他"）。"""
+    space = space or ACTIVE_SPACE
+    if space in _OWNER_NAME_CACHE:
+        return _OWNER_NAME_CACHE[space]
+    name = ""
+    try:
+        import json
+        from voicemem.utils.common import space as _sp
+        d, _ = space_dir(space)
+        p = _sp.mm(d, "voiceprint_registry.json")
+        if p.is_file():
+            data = json.loads(p.read_text(encoding="utf-8"))
+            cands = []
+            for key, v in (data or {}).items():
+                if not isinstance(v, dict) or v.get("role") != "user":
+                    continue
+                n = (v.get("name") or "").strip()
+                # 挡掉疑问句绑进来的假名字，也挡掉 "user" 这种占位 key
+                if not n or n.lower() == "user" or any(c in n for c in _BAD_NAME_CHARS):
+                    continue
+                cands.append((bool(v.get("entity_id")), n))
+            if cands:
+                # 有 entity_id 的更可信（真的在图里落过地）
+                cands.sort(key=lambda t: not t[0])
+                name = cands[0][1]
+    except Exception as e:
+        print(f"[rb] 主人姓名读取失败：{type(e).__name__}: {e}", flush=True)
+    _OWNER_NAME_CACHE[space] = name
+    return name
+
+
 _RB_HUMAN: dict = {}          # claim 原文 -> 人话版本
 _RB_HUMAN_PENDING: set = set()
 #: 关掉就一直显示原始 claim（不想为显示花钱时）。
 RB_HUMANIZE = os.environ.get("VOICEMEM_RB_HUMANIZE", "1") != "0"
 
 _RB_HUMANIZE_PROMPT = (
-    # 三版教训，别再退回去：
+    # 四版教训，别再退回去：
     # ① 只写"第一人称"不够——不说清是**谁**在说，模型只做同义替换。
     # ② "不许新增事实"会被读成"不许换说法"，于是退化成往原句前贴个"我注意到"。
     #    要把两件事拆开：事实不能加，措辞必须重说。
     # ③ "我发现/我注意到/在我看来"全是**报告动词**——语法上是第一人称，语气上还是
     #    观察员在汇报。要的是一个懂他的小东西在心疼他，所以这类开头得禁掉。
-    "下面每行是一条关于某个人的判断，来自一个一直陪着他的小助手——"
+    # ④ 名字那条第一版写的是"和「他」换着用"，太软，十条全用了"他"——示例里也全是
+    #    "他"，模型照着示例走。所以要给**具体条数**，示例也得点名。
+    "下面每行是一条关于 {who} 的判断，来自一个一直陪着 {who} 的小助手——"
     "像只很懂他的小动物，安静地待在旁边，什么都看在眼里。\n"
     "把每一条改写成这个小助手会说出来的话。\n"
     "\n"
@@ -2038,7 +2081,8 @@ _RB_HUMANIZE_PROMPT = (
     "· 有温度，带一点点护着他的意思——是心疼，不是分析。\n"
     "· **不要用「我发现」「我注意到」「在我看来」开头**，那是汇报的口气。"
     "直接说那件事，或者说你替他觉得怎么样。\n"
-    "· 别肉麻、别撒娇、别堆感叹号、别喊他的名字、别讲道理也别安慰。\n"
+    "· 别肉麻、别撒娇、别堆感叹号、别讲道理也别安慰。\n"
+    "{name_rule}"
     "\n"
     "内容：\n"
     "· **必须换一种说法**。原句是概括性的词（「简短回应」「寻求认同」），"
@@ -2048,26 +2092,39 @@ _RB_HUMANIZE_PROMPT = (
     "\n"
     "逐行输出，行数和顺序跟输入完全一致；不要编号、引号或多余的话。\n"
     "例：\n"
+    "{examples}"
+)
+
+#: 示例。{who} 会被替换成主人的名字——示例里不点名的话，模型会照着示例一路用"他"。
+_RB_HUMANIZE_EXAMPLES = (
     "  输入  在焦虑时倾向于简短回应\n"
-    "  输出  他一紧张就闷声不响\n"
+    "  输出  {who}一紧张就闷声不响\n"
     "  输入  在情绪低落时不喜欢被忽视\n"
     "  输出  他难过的时候，最怕没人理\n"
     "  输入  注重深度与真实连接\n"
-    "  输出  他不爱热闹，就想好好说说话\n"
+    "  输出  {who}不爱热闹，就想好好说说话\n"
     "  输入  Feels accomplished when recognized\n"
-    "  输出  A little praise and he lights right up\n"
+    "  输出  A little praise and {who} lights right up\n"
     "  输入  Hates being interrupted\n"
     "  输出  Cut him off mid-sentence and you'll lose him\n"
 )
 
 
-def _rb_humanize_now(claims: list) -> None:
+def _rb_humanize_now(claims: list, name: str = "") -> None:
     """后台线程里跑：一次 LLM 往返改写一批，结果落进 _RB_HUMAN。"""
     try:
         from openai import OpenAI
+        who = name or "他"
+        sysmsg = _RB_HUMANIZE_PROMPT.format(
+            who=who,
+            # 给具体条数，不然"换着用"会被忽略；也不能每句都点名，那像念花名册。
+            name_rule=(f"· **十条里挑三到四条直接叫他「{name}」**，其余用「他」。"
+                       "一句都不点名显得生分，句句点名又像在念花名册。\n"
+                       if name else ""),
+            examples=_RB_HUMANIZE_EXAMPLES.replace("{who}", who))
         r = OpenAI().chat.completions.create(
             model=utils.CHAT_MODEL, temperature=0.7,
-            messages=[{"role": "system", "content": _RB_HUMANIZE_PROMPT},
+            messages=[{"role": "system", "content": sysmsg},
                       {"role": "user", "content": "\n".join(claims)}],
         )
         lines = [x.strip() for x in (r.choices[0].message.content or "").splitlines() if x.strip()]
@@ -2075,24 +2132,25 @@ def _rb_humanize_now(claims: list) -> None:
             print(f"[rb] 改写行数不符（{len(lines)}≠{len(claims)}），这批跳过", flush=True)
             return
         for c, h in zip(claims, lines):
-            _RB_HUMAN[c] = h
+            _RB_HUMAN[(name, c)] = h
     except Exception as e:
         print(f"[rb] 判断改写失败：{type(e).__name__}: {e}", flush=True)
     finally:
-        _RB_HUMAN_PENDING.difference_update(claims)
+        _RB_HUMAN_PENDING.difference_update((name, c) for c in claims)
 
 
 def rb_human(claim: str) -> str:
     """显示用的那句话。还没改写好就先返回原文，同时排上队。"""
     if not RB_HUMANIZE or not claim:
         return claim
-    hit = _RB_HUMAN.get(claim)
+    name = owner_name()
+    hit = _RB_HUMAN.get((name, claim))
     if hit:
         return hit
-    if claim not in _RB_HUMAN_PENDING:
-        _RB_HUMAN_PENDING.add(claim)
+    if (name, claim) not in _RB_HUMAN_PENDING:
+        _RB_HUMAN_PENDING.add((name, claim))
         import threading
-        threading.Thread(target=_rb_humanize_now, args=([claim],), daemon=True).start()
+        threading.Thread(target=_rb_humanize_now, args=([claim], name), daemon=True).start()
     return claim
 
 
@@ -2100,13 +2158,14 @@ def rb_human_batch(claims: list) -> None:
     """一次把缺的都排上队——脑图一屏几十条，一条一个线程太浪费。"""
     if not RB_HUMANIZE:
         return
+    name = owner_name()
     todo = [c for c in dict.fromkeys(claims)
-            if c and c not in _RB_HUMAN and c not in _RB_HUMAN_PENDING]
+            if c and (name, c) not in _RB_HUMAN and (name, c) not in _RB_HUMAN_PENDING]
     if not todo:
         return
-    _RB_HUMAN_PENDING.update(todo)
+    _RB_HUMAN_PENDING.update((name, c) for c in todo)
     import threading
-    threading.Thread(target=_rb_humanize_now, args=(todo,), daemon=True).start()
+    threading.Thread(target=_rb_humanize_now, args=(todo, name), daemon=True).start()
 
 
 def right_brain_tree(uid, facts):
