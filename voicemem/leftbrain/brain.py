@@ -65,6 +65,32 @@ RECENCY_HALFLIFE_DAYS = float(os.environ.get("VOICEMEM_RECENCY_HALFLIFE_DAYS", "
 RECENCY_FLOOR = float(os.environ.get("VOICEMEM_RECENCY_FLOOR", "0.75"))
 
 
+#: 只有问"最近怎么样"这类问题时才按时间加权。
+#:
+#: 一开始是**所有查询**都乘时间权重，实测出事：「我在哪读书」的正确答案
+#: （"Jiaqi is an undergraduate in computer science at NUS"，半年前记下的）
+#: 相似度 0.810 全场最高，乘上 0.752 之后掉到 0.609，被一条 0.773 的
+#: 「用户希望用中文交流」挤到第六。
+#: 原因是**长期属性的答案天然是旧的**：专业、过敏、老家、性格——它们没有更新的
+#: 版本，罚旧等于罚对。而"最近在忙什么"这类问题才真的该偏向新的。
+#: 所以按问句区分：问时效才加权，问属性不加权。
+#:
+#: 事实相互矛盾时（"在 TikTok 实习" / "在 NVIDIA 实习"）不靠这里解决——
+#: 两条都带日期进 prompt，由回复模型按时间取舍，那条路更准也没有副作用。
+_RECENCY_CUES = (
+    "最近", "近来", "这阵子", "这几天", "今天", "昨天", "刚才", "刚刚",
+    "现在", "目前", "当前", "这两天", "最新", "上周", "本周", "这周",
+    "recent", "lately", "today", "yesterday", "just now", "right now",
+    "currently", "these days", "this week", "last week", "latest",
+)
+
+
+def wants_recency(query: str) -> bool:
+    """这个问题问的是「近况」还是「属性」。"""
+    q = (query or "").lower()
+    return any(c in q for c in _RECENCY_CUES)
+
+
 def _recency_weight(observed_at: str) -> float:
     """事情发生得越近，权重越高；没有日期就不打折（当作与时间无关的属性）。"""
     if RECENCY_HALFLIFE_DAYS <= 0 or not observed_at:
@@ -521,11 +547,15 @@ class LeftBrain:
         # （"今天感到很累，可能与明天下午的会议有关" / "最近感到很累，可能与明天
         # 下午的会议有关"），它们分数也几乎一样，于是 top-5 里有两三条说的是同一
         # 件事——用户的感受是"它就记得这么点东西"。
-        # 去重之后按「相似度 × 时间权重」重排再截断。重排只在候选池内部发生，
-        # 召回不变——见 _recency_weight 上面那段。
-        final_hits = sorted(_dedupe_near(hits),
-                            key=lambda h: h.score * _recency_weight(h.observed_at),
-                            reverse=True)[:top_k]
+        # 去重之后截断。问「近况」的才按时间加权重排（见 wants_recency 上面那段），
+        # 问「属性」的保持纯相似度——长期属性的正确答案天然是旧的，罚旧等于罚对。
+        # 重排只在候选池内部发生，召回不变。
+        deduped = _dedupe_near(hits)
+        if wants_recency(query):
+            deduped = sorted(deduped,
+                             key=lambda h: h.score * _recency_weight(h.observed_at),
+                             reverse=True)
+        final_hits = deduped[:top_k]
         # 记忆生命周期：检索命中增加热度，读取时按 last_hit_at 指数衰减、低热度归档。
         cog_store = repo._cognitive_store
         if cog_store is not None and hasattr(cog_store, "record_memory_hits"):
