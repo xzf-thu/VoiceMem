@@ -2071,7 +2071,11 @@ _RB_HUMANIZE_PROMPT = (
     # ③ "我发现/我注意到/在我看来"全是**报告动词**——语法上是第一人称，语气上还是
     #    观察员在汇报。要的是一个懂他的小东西在心疼他，所以这类开头得禁掉。
     # ④ 名字那条第一版写的是"和「他」换着用"，太软，十条全用了"他"——示例里也全是
-    #    "他"，模型照着示例走。所以要给**具体条数**，示例也得点名。
+    #    "他"，模型照着示例走。规则要硬，示例也得点名。
+    #    后来改成**一律点名**：页面上每条是独立的一行，不是一段连贯的话，
+    #    重复出现名字读起来是"这是关于谁的"，不是啰嗦。
+    # ⑤ 显示语言跟**界面**走，不跟原文走。库里中英混着（翻译过一半），跟原文走
+    #    页面上就中英混排。显示是给人看的，同一屏里不该夹生。
     "下面每行是一条关于 {who} 的判断，来自一个一直陪着 {who} 的小助手——"
     "像只很懂他的小动物，安静地待在旁边，什么都看在眼里。\n"
     "把每一条改写成这个小助手会说出来的话。\n"
@@ -2088,40 +2092,56 @@ _RB_HUMANIZE_PROMPT = (
     "· **必须换一种说法**。原句是概括性的词（「简短回应」「寻求认同」），"
     "要还原成人会怎么形容（「话就变少了」「想有人接住他」）。\n"
     "· 但**不许新增任何事实**：不补细节、不猜原因、不加评价。换措辞，不换内容。\n"
-    "· 原文什么语言就用什么语言。\n"
+    "· 全部用{lang}输出，不管原文是什么语言。\n"
     "\n"
     "逐行输出，行数和顺序跟输入完全一致；不要编号、引号或多余的话。\n"
     "例：\n"
     "{examples}"
 )
 
-#: 示例。{who} 会被替换成主人的名字——示例里不点名的话，模型会照着示例一路用"他"。
-_RB_HUMANIZE_EXAMPLES = (
-    "  输入  在焦虑时倾向于简短回应\n"
-    "  输出  {who}一紧张就闷声不响\n"
-    "  输入  在情绪低落时不喜欢被忽视\n"
-    "  输出  他难过的时候，最怕没人理\n"
-    "  输入  注重深度与真实连接\n"
-    "  输出  {who}不爱热闹，就想好好说说话\n"
-    "  输入  Feels accomplished when recognized\n"
-    "  输出  A little praise and {who} lights right up\n"
-    "  输入  Hates being interrupted\n"
-    "  输出  Cut him off mid-sentence and you'll lose him\n"
-)
+#: 示例。两件事都靠它带：**语气**和**输出语言**。
+#: 模型跟示例走的力度远大于跟规则走——名字那条和语言这条都在这儿栽过：
+#: 规则写了"每条点名"但示例用「他」，输出就全是「他」；规则写了"输出英文"
+#: 但示例全中文，输出就全是中文。所以示例必须跟着目标语言换，而且都要点名。
+_RB_HUMANIZE_EXAMPLES = {
+    "zh": (
+        "  输入  在焦虑时倾向于简短回应\n"
+        "  输出  {who}一紧张就闷声不响\n"
+        "  输入  在情绪低落时不喜欢被忽视\n"
+        "  输出  {who}难过的时候，最怕没人理\n"
+        "  输入  Feels accomplished when recognized\n"
+        "  输出  夸{who}一句，他整个人就亮了\n"
+        "  输入  Hates being interrupted\n"
+        "  输出  打断{who}说话，他立刻就不说了\n"
+    ),
+    "en": (
+        "  输入  在焦虑时倾向于简短回应\n"
+        "  输出  {who} goes quiet the moment he tenses up\n"
+        "  输入  在情绪低落时不喜欢被忽视\n"
+        "  输出  When {who} is down, being ignored is the worst of it\n"
+        "  输入  Feels accomplished when recognized\n"
+        "  输出  A little praise and {who} lights right up\n"
+        "  输入  Hates being interrupted\n"
+        "  输出  Cut {who} off mid-sentence and you'll lose him\n"
+    ),
+}
 
 
-def _rb_humanize_now(claims: list, name: str = "") -> None:
+def _rb_humanize_now(claims: list, name: str = "", lang: str = "zh") -> None:
     """后台线程里跑：一次 LLM 往返改写一批，结果落进 _RB_HUMAN。"""
+    lang_name = "英文" if lang == "en" else "中文"
     try:
         from openai import OpenAI
         who = name or "他"
         sysmsg = _RB_HUMANIZE_PROMPT.format(
             who=who,
-            # 给具体条数，不然"换着用"会被忽略；也不能每句都点名，那像念花名册。
-            name_rule=(f"· **十条里挑三到四条直接叫他「{name}」**，其余用「他」。"
-                       "一句都不点名显得生分，句句点名又像在念花名册。\n"
+            lang=lang_name,
+            # 规则要硬。写"换着用"的那版，十条全用了"他"。
+            name_rule=(f"· **每条都直接叫他「{name}」**，别用「他」代替——"
+                       "页面上每条是独立一行，点名是在说「这是关于谁的」。\n"
                        if name else ""),
-            examples=_RB_HUMANIZE_EXAMPLES.replace("{who}", who))
+            examples=_RB_HUMANIZE_EXAMPLES.get(lang, _RB_HUMANIZE_EXAMPLES["zh"])
+                     .replace("{who}", who))
         r = OpenAI().chat.completions.create(
             model=utils.CHAT_MODEL, temperature=0.7,
             messages=[{"role": "system", "content": sysmsg},
@@ -2132,25 +2152,26 @@ def _rb_humanize_now(claims: list, name: str = "") -> None:
             print(f"[rb] 改写行数不符（{len(lines)}≠{len(claims)}），这批跳过", flush=True)
             return
         for c, h in zip(claims, lines):
-            _RB_HUMAN[(name, c)] = h
+            _RB_HUMAN[(lang, name, c)] = h
     except Exception as e:
         print(f"[rb] 判断改写失败：{type(e).__name__}: {e}", flush=True)
     finally:
-        _RB_HUMAN_PENDING.difference_update((name, c) for c in claims)
+        _RB_HUMAN_PENDING.difference_update((lang, name, c) for c in claims)
 
 
 def rb_human(claim: str) -> str:
     """显示用的那句话。还没改写好就先返回原文，同时排上队。"""
     if not RB_HUMANIZE or not claim:
         return claim
-    name = owner_name()
-    hit = _RB_HUMAN.get((name, claim))
+    name, lang = owner_name(), UI_LANG
+    hit = _RB_HUMAN.get((lang, name, claim))
     if hit:
         return hit
-    if (name, claim) not in _RB_HUMAN_PENDING:
-        _RB_HUMAN_PENDING.add((name, claim))
+    if (lang, name, claim) not in _RB_HUMAN_PENDING:
+        _RB_HUMAN_PENDING.add((lang, name, claim))
         import threading
-        threading.Thread(target=_rb_humanize_now, args=([claim], name), daemon=True).start()
+        threading.Thread(target=_rb_humanize_now,
+                         args=([claim], name, lang), daemon=True).start()
     return claim
 
 
@@ -2158,14 +2179,15 @@ def rb_human_batch(claims: list) -> None:
     """一次把缺的都排上队——脑图一屏几十条，一条一个线程太浪费。"""
     if not RB_HUMANIZE:
         return
-    name = owner_name()
+    name, lang = owner_name(), UI_LANG
     todo = [c for c in dict.fromkeys(claims)
-            if c and (name, c) not in _RB_HUMAN and (name, c) not in _RB_HUMAN_PENDING]
+            if c and (lang, name, c) not in _RB_HUMAN
+            and (lang, name, c) not in _RB_HUMAN_PENDING]
     if not todo:
         return
-    _RB_HUMAN_PENDING.update((name, c) for c in todo)
+    _RB_HUMAN_PENDING.update((lang, name, c) for c in todo)
     import threading
-    threading.Thread(target=_rb_humanize_now, args=(todo, name), daemon=True).start()
+    threading.Thread(target=_rb_humanize_now, args=(todo, name, lang), daemon=True).start()
 
 
 def right_brain_tree(uid, facts):
