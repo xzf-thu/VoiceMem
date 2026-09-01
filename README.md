@@ -510,7 +510,7 @@ vm = VoiceMem(
     top_k=5,
 )
 
-# Local models are loaded lazily. Warm them up to avoid loading overhead on the first call.
+# Local models load lazily -- warm them up so the first call doesn't pay for it.
 vm.warmup()
 
 # Store an audio file.
@@ -519,8 +519,8 @@ print("ingest start")
 vm.ingest(audio="assets/input.wav")  # I am vegetarian and allergic to nuts.
 print("ingest done")
 
-# Ingestion takes longer because VoiceMem extracts facts, assigns tags, and updates the graph.
-# Retrieval uses a pure vector lookup and is independent of ingestion cost.
+# Ingestion is slow because it extracts facts, tags them, and builds the graph.
+# Retrieval is a pure vector lookup -- independent of ingestion cost.
 print("search start")
 result = vm.search("What are my dietary restrictions?")
 print("search done")
@@ -650,7 +650,7 @@ At query time, VoiceMem **routes first, ranks second, and injects only the Top-K
 ### Key Features
 
 * 🎯 **Accurate** — Reaches **91.2% on LoCoMo**, compared with **61.68% for Mem0**, using only **Top-5** memories.
-* ❤️ **Emotion- and Personality-Aware** — Remembers not only **what the user said**, but also **who the user is and how they feel**. Reaches **69.44% on PersonaMem**.
+* ❤️ **Emotional & Personal** — Remembers not only **what the user said**, but also **who the user is and how they feel**. Reaches **69.44% on PersonaMem**.
 * 🎧 **Multimodal** — Remembers **speech, speakers, sound events, multi-speaker conversations, and music** from real-world audio.
 * ⚡ **Fast** — Responds in **134 ms**, compared with **1,440 ms for Mem0**, with streaming retrieval inside the voice turn.
 * 💰 **Low Token Usage** — Uses only **430 memory tokens**, compared with **6,956 for Mem0** and **1,899 for EverMemOS**.
