@@ -752,9 +752,6 @@ significant 不管真假，其余字段都要照填（调用方另有判定）�
             if not attribution.get("significant"):
                 return
 
-            from voicemem.rightbrain.types import MemoryAnchor
-            from voicemem.rightbrain.anchor_router import normalize_emotion_strict
-
             def _clip(v) -> str:
                 s = str(v or "").strip()
                 return s if len(s) <= self._EXPERIENCE_MAX_CHARS else s[:self._EXPERIENCE_MAX_CHARS] + "…"
