@@ -82,8 +82,8 @@ https://github.com/user-attachments/assets/0d919f8c-e9ba-4fdb-8078-b049e4b99a28
 ### 安装
 
 ```bash
-git clone https://github.com/lang-jiaqi/Voicemem_open.git
-cd Voicemem_open
+git clone https://github.com/xzf-thu/VoiceMem.git
+cd VoiceMem
 
 # 安装记忆系统（含 ASR / 声纹 / 场景 / 情绪 / 本地 embedding 全套内置组件）
 pip install voicemem
@@ -476,9 +476,11 @@ https://github.com/user-attachments/assets/0d919f8c-e9ba-4fdb-8078-b049e4b99a28
 
 ### Installation
 
+**Prerequisite:** Python 3.10+
+
 ```bash
-git clone https://github.com/lang-jiaqi/Voicemem_open.git
-cd Voicemem_open
+git clone https://github.com/xzf-thu/VoiceMem.git
+cd VoiceMem
 
 # Install the memory system (bundles ASR / speaker ID / scene / emotion / local embedding)
 pip install voicemem
@@ -656,7 +658,7 @@ At query time, VoiceMem **routes first, ranks second, and injects only the Top-K
 
 ## 🤖 VoiceMem Model Families
 
-We build **ChatMem-400K** through a three-stage OPD training pipeline:
+We built **ChatMem-400K** through a three-stage OPD training pipeline:
 
 1. **Memory-world construction**
 2. **SLM-validated online on-policy distillation (OPD)**
