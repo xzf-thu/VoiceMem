@@ -435,7 +435,7 @@ VoiceMem 基于 **Apache License 2.0** 开源。
 
 ---
 
-We introduce VoiceMem, adding a final missing component to voice models: a soul—so they can truly understand you better over time. VoiceMem is built on a streaming dual-brain architecture and provides an accurate, emotion- and personality-aware, low-latency, and cost-efficient memory layer. This repository is and will remain fully open source.
+We introduce **VoiceMem**, adding the final component to voice models: a soul, so they truly come to understand you better over time. VoiceMem is built on a <strong>streaming dual-brain</strong> architecture and provides **accurate, emotional, personality-aware, low-latency, and lowest-cost memory services**. This repository will <strong>remain fully open source, permanently</strong>.
 
 A quick overview of VoiceMem:
 
