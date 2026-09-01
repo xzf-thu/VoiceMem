@@ -246,6 +246,8 @@ class TraitStore:
         q = self._vec(query)
         if q is None:
             return []
+        # 检索侧据此选门槛——阈值跟 embedder 绑，见 brain.trait_min_sim。
+        self.last_query_dim = int(q.shape[0])
         with self._conn() as c:
             rows = c.execute("SELECT * FROM rb_traits WHERE user_id=? AND embedding IS NOT NULL",
                              (user_id,)).fetchall()

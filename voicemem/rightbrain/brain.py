@@ -241,7 +241,24 @@ def _is_self_entity(ent, user_id: str, owner_names) -> bool:
 #: 相似度全挤在 0.36–0.45，第一名和第八名只差 0.08，那就是没命中，返回它们只是
 #: 拿噪音把 top-N 的位置占满（右脑限席那段注释里说的就是这个）。
 #: 宁可这一轮右脑不给画像，也不要给三条不相关的。
-RB_TRAIT_MIN_SIM = float(os.environ.get("VOICEMEM_RB_TRAIT_MIN_SIM", "0.45"))
+#: 换 embedder 之后这个数必须重量——不同模型的相似度分布完全不同，写死一个常量
+#: 只对其中一个有效。实测（同一批 130 条判断）：
+#:   OpenAI text-embedding-3-small   噪音上界约 0.24  → 0.45 偏严但可用
+#:   本地 multilingual-e5-small      真命中 0.89~0.92   噪音 0.82~0.86  → 0.88
+#: E5 把短句相似度整体抬高并压窄，拿 0.45 去卡它等于没有门槛（噪音也有 0.86）。
+#: 按向量维度选一档：384 = 本地 E5，其余按 OpenAI。维度不是模型身份的严格标识，
+#: 但在当前两个内置实现之间够用；要精确就用 VOICEMEM_RB_TRAIT_MIN_SIM 显式指定。
+_TRAIT_MIN_SIM_BY_DIM = {384: 0.88}
+_TRAIT_MIN_SIM_DEFAULT = 0.45
+RB_TRAIT_MIN_SIM = float(os.environ.get("VOICEMEM_RB_TRAIT_MIN_SIM",
+                                        _TRAIT_MIN_SIM_DEFAULT))
+
+
+def trait_min_sim(dim: int | None) -> float:
+    """这个 embedder 该用多高的门槛。显式设了环境变量就一切照它。"""
+    if os.environ.get("VOICEMEM_RB_TRAIT_MIN_SIM"):
+        return RB_TRAIT_MIN_SIM
+    return _TRAIT_MIN_SIM_BY_DIM.get(dim or 0, _TRAIT_MIN_SIM_DEFAULT)
 
 
 def _rb_trait_hits(store, user_id: str, query: str, top_k: int = 4) -> list["RightBrainHit"]:
@@ -257,7 +274,7 @@ def _rb_trait_hits(store, user_id: str, query: str, top_k: int = 4) -> list["Rig
     """
     out: list[RightBrainHit] = []
     for t, sim in store.search_scored(user_id, query, top_k=top_k):
-        if sim < RB_TRAIT_MIN_SIM:
+        if sim < trait_min_sim(getattr(store, "last_query_dim", None)):
             break                      # 已按相似度降序，后面只会更低
         # 证据里挑最近一条当支撑——光一句 claim，模型看不出它是从哪来的。
         ev = t.evidence[0].quote if t.evidence else ""
