@@ -54,7 +54,8 @@
 
 ## 🔥 News
 
-* **08/27/2026 · v0.0.1** — 发布初代 **VoiceMem** 和 **Technical Report**。
+* 💬 **09/01/2026 · v0.0.2** — 提升对话连续性，优化右脑画像呈现与记忆结构。
+* 🎉 **08/27/2026 · v0.0.1** — 发布初代 **VoiceMem** 和 **Technical Report**。
 
 ## 🎬 Demo
 
@@ -446,7 +447,8 @@ A quick overview of VoiceMem:
 
 ## 🔥 News
 
-* **08/27/2026 · v0.0.1** — Released the first version of **VoiceMem** and our **Technical Report**.
+* 💬 **09/01/2026 · v0.0.2** — Improved conversational continuity; refined right-brain profile presentation and memory structure.
+* 🎉 **08/27/2026 · v0.0.1** — Released the first version of **VoiceMem** and our **Technical Report**.
 
 ## 🎬 Demo Video
 
