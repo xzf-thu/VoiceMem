@@ -439,10 +439,10 @@ We introduce **VoiceMem**, adding the final component to voice models: a soul, s
 
 A quick overview of VoiceMem:
 
-* **Left Brain:** Directly manages factual information while maintaining Mem0-level performance with only the Top-3 memories.
-* **Right Brain:** Models emotional intelligence through short- and long-term emotional attribution, including cross-entity nodes jointly maintained with Left Brain information.
-* **Low Latency:** Combines information compression, hierarchical storage, and streaming retrieval with 0–300 ms speculative prefetching, adding almost no additional latency.
-* **Simple and Practical:** Each query uses about 300 tokens. The architecture is fully decoupled, so every component—including the underlying memory engine—can be replaced.
+* **Left Brain:** Directly manages factual information and sustains Mem0's full performance under a Top-3 memory limit.
+* **Right Brain:** Manages emotional intelligence through short-term and long-term emotional attribution, including cross-entity nodes and joint maintenance with Left Brain information.
+* **Low Latency:** Uses information compression, hierarchical storage, and streaming retrieval with 0–300 ms speculative prefetching, adding almost no extra latency.
+* **Simple and Practical:** Each query uses about 300 tokens. The architecture is fully decoupled, and every component, including the underlying memory engine, can be replaced.
 
 <p align="center">
   <img src="assets/teaser.webp" alt="VoiceMem Overview" width="100%">
@@ -450,7 +450,7 @@ A quick overview of VoiceMem:
 
 ## 🔥 News
 
-* 💬 **09/01/2026 · [v0.0.2](https://github.com/xzf-thu/VoiceMem/releases/tag/v0.0.2)** — Fixed the memory event-date pipeline, removed a redundant Right Brain memory class, and added a pluggable speech-synthesis layer.
+* 💬 **09/01/2026 · [v0.0.2](https://github.com/xzf-thu/VoiceMem/releases/tag/v0.0.2)** — Fixed the memory event-date path, removed a redundant right-brain memory class, and opened up the speech synthesis layer.
 * 🎉 **08/27/2026 · [v0.0.1](https://github.com/xzf-thu/VoiceMem/releases/tag/v0.0.1)** — Released the first version of **VoiceMem** and our **Technical Report**.
 * 🤖 **08/21/2026** — Open-sourced the **VoiceMem model family** (Qwen2.5-Omni / Qwen3-Omni / Step-Audio2-Mini), able to read and use the memory VoiceMem provides.
 * 🛠️ **08/21/2026** — Released **VoiceMem Utils**, all default local models packaged for out-of-the-box use.
@@ -464,10 +464,10 @@ https://github.com/user-attachments/assets/0d919f8c-e9ba-4fdb-8078-b049e4b99a28
 ## 📚 Overview
 
 * [🚀 Quick Start](#-quick-start)
-* [🧠 VoiceMem Dual-Brain Streaming Architecture](#-voicemem-a-streaming-dual-brain-memory-architecture)
+* [🧠 VoiceMem Dual-Brain Streaming Architecture](#-voicemem-memory-with-a-streaming-dual-brain-architecture)
 * [🤖 VoiceMem Model Families](#-voicemem-model-families)
 * [🔌 Customize Your Voice Agent with VoiceMem](#-customize-your-voice-agent-with-voicemem)
-* [🛠️ Fine-Tuning](#️-fine-tuning)
+* [🛠️ Finetuning](#️-finetuning)
 * [📊 Evaluation](#-evaluation)
 * [Acknowledgements](#acknowledgements)
 * [License](#license)
@@ -489,7 +489,7 @@ pip install voicemem
 pip install "voicemem[slm]"
 ```
 
-### Download Required Models
+### Required Model Download
 
 ```bash
 pip install -U huggingface_hub
@@ -519,8 +519,8 @@ print("ingest start")
 vm.ingest(audio="assets/input.wav")  # I am vegetarian and allergic to nuts.
 print("ingest done")
 
-# Ingestion is slow because it extracts facts, tags them, and builds the graph.
-# Retrieval is a pure vector lookup -- independent of ingestion cost.
+# Writing is slow because it extracts facts, tags them and builds the graph.
+# Reading is a pure vector lookup -- independent of write cost.
 print("search start")
 result = vm.search("What are my dietary restrictions?")
 print("search done")
@@ -528,7 +528,7 @@ print("search done")
 print(result.result_leftbrain, result.result_rightbrain)
 
 
-# Store factual text directly in the Left Brain (without emotional information).
+# Store Left Brain factual text directly (no emotional information).
 vm = VoiceMem(
     mode="leftbrain_only",
     openai_key="api_xxx",
@@ -542,9 +542,9 @@ result = vm.search("What are my dietary restrictions?")
 
 #### Run VoiceMem in Streaming Mode
 
-You can think of VoiceMem's streaming API as a VAD-style interface that continuously processes incoming audio.
+Think of VoiceMem's streaming interface as a VAD interface that continuously processes audio.
 
-The example below first stores a fact, then streams a spoken **question** to demonstrate how VoiceMem can retrieve relevant memories before the speaker finishes. Once the turn ends, VoiceMem also evaluates whether the transcript should be stored.
+The example below stores one fact explicitly, then feeds a **question** as audio to show how the memory is already retrieved before the speaker finishes. It ends, as always, with the ingest decision.
 
 ```python
 import asyncio
@@ -556,7 +556,7 @@ import soundfile as sf
 
 from voicemem import VoiceMem
 
-# Create a new instance so this example can run standalone.
+# Reuses the vm above; building one here so the block runs standalone
 vm = VoiceMem(mode="normal", openai_key=os.environ["OPENAI_API_KEY"], top_k=5)
 
 # Local models load lazily -- warm them up so the first audio chunk doesn't wait
@@ -570,12 +570,12 @@ searching = False
 
 
 def on_partial(text):
-    """Process partial transcripts as they arrive and begin retrieval once enough context is available."""
+    """Partial transcripts as they arrive. Long enough = the search already started."""
     global searching
     print(f"\r[partial] {text}", end="", flush=True)
     if not searching and len(text) >= SPEC_MIN_CHARS:
         searching = True
-        print("\n[search start] speaker is still talking; retrieval is already running", flush=True)
+        print("\n[search start] speaker isn't done yet, retrieval already running", flush=True)
 
 
 async def main():
@@ -591,8 +591,7 @@ async def main():
         if st.state != "turn_over":
             continue
 
-        # VAD confirmed the end of the turn. Memories were retrieved while the user was speaking,
-        # so the results are immediately available.
+        # VAD confirmed end of turn. Memory was fetched while the user spoke -- just read it
         print("[search end]")
         print("transcript  ", st.transcript)
         print("left brain  ", st.result_leftbrain)
@@ -610,9 +609,9 @@ async def main():
 asyncio.run(main())
 ```
 
-### Interactive Demo
+### Interactive Demo with VoiceMem
 
-The interactive demo is included in the repository, but not in the PyPI package. Make sure you have cloned the repository and are running the command from its root directory.
+The demo lives in the repo (the pip package ships the library only) — make sure you have cloned it and are in the repo root.
 
 ```bash
 python web/run.py
@@ -624,11 +623,11 @@ Then open:
 http://localhost:8787
 ```
 
-## 🧠 VoiceMem: A Streaming Dual-Brain Memory Architecture
+## 🧠 VoiceMem: Memory with a Streaming Dual-Brain Architecture
 
-**VoiceMem** is a memory system designed for real-time voice agents.
+**VoiceMem** is a memory system built for real-time voice agents.
 
-Rather than storing every type of memory in a single retrieval database, VoiceMem separates memory into two complementary systems:
+Instead of storing every type of memory in a single retrieval database, VoiceMem separates memory into two complementary parts:
 
 <p align="center">
   <img src="docs/images/fig-architecture.webp" alt="VoiceMem Architecture" width="80%">
@@ -659,7 +658,7 @@ At query time, VoiceMem **routes first, ranks second, and injects only the Top-K
 
 ## 🤖 VoiceMem Model Families
 
-We built **ChatMem-400K** using a three-stage OPD training pipeline:
+We built **ChatMem-400K** through a three-stage OPD training pipeline:
 
 1. **Memory-world construction**
 2. **SLM-validated online on-policy distillation (OPD)**
@@ -667,7 +666,7 @@ We built **ChatMem-400K** using a three-stage OPD training pipeline:
 
 After human editing, the same pipeline produces **ChatMem-Bench**, which evaluates whether a voice model can build a long-term understanding of the user over time.
 
-The open-source VoiceMem model family includes **Qwen2.5-Omni, Qwen3-Omni, and Step-Audio2-Mini**. These models can receive and interpret memories provided by VoiceMem during conversations.
+The open-source VoiceMem model family includes **Qwen2.5-Omni, Qwen3-Omni, and Step-Audio2-Mini**. These models can receive and understand memory information provided by VoiceMem during conversations.
 
 <p align="center">
   <img src="docs/images/fig-opd.webp" alt="VoiceMem OPD Pipeline" width="90%">
@@ -689,18 +688,18 @@ export OPENAI_API_KEY=sk-...
 python examples/03_simple_agent_with_voicemem_memory.py
 ```
 
-To use your own model, simply replace the generation step—the VoiceMem memory pipeline remains unchanged:
+To use your own model, replace the generation step — the memory half stays exactly as is:
 
 ```python
-def my_reply(text, memory_context):        # synchronous functions are supported; they run off-thread
+def my_reply(text, memory_context):        # a sync function is fine, it runs off-thread
     return my_model.generate(system=memory_context, user=text)
 
 vm = VoiceMem(reply=my_reply)
 ```
 
-## 🛠️ Fine-Tuning
+## 🛠️ Finetuning
 
-VoiceMem provides a complete fine-tuning pipeline for training your own VoiceMem Model Family adapter.
+VoiceMem provides the complete finetuning pipeline for training your own VoiceMem Model Family adapter.
 
 The default training configuration matches the one used for the released `checkpoint-3318`.
 
@@ -724,7 +723,7 @@ The evaluation pipeline is fully open source and reproducible.
 
 ### Run Evaluation
 
-Run the benchmark with a single command:
+A benchmark can be started with a single command:
 
 ```bash
 export OPENAI_API_KEY=sk-...
@@ -757,7 +756,7 @@ Median retrieval latency: 12 ms
 Median retrieved memory: 298 tokens
 ```
 
-Before running the full evaluation, use `--inspect` to verify that the dataset is parsed correctly.
+Before running a full evaluation, add `--inspect` to check how the dataset is parsed.
 
 This mode does not call the model and does not incur API costs:
 
