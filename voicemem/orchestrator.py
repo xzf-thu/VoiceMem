@@ -555,6 +555,23 @@ class Orchestrator:
         return result
 
     def _embed_text(self, text: str) -> list[float]:
+        """图层实体 / slot 锚点 / 右脑判断表用的 embedding。
+
+        **注入了 embedder 就用注入的那个**——这里以前写死 OpenAI，绕过了
+        ``VoiceMem(embedding=…)``，于是配了本地模型也只生效一半：记忆向量走本地，
+        图层实体和判断表仍然发远程。同一个库里因此并存两种维度（384 / 1536），
+        而下面那句"跟左脑共用一份缓存"也从来没兑现过——缓存按模型名分键，
+        两条通道用不同模型时一次都命中不了。
+
+        这条还在**查询热路径**上：右脑检索每轮都会调它
+        （traits_store.search_scored）。实测本地 E5 查询 embedding 10ms、
+        OpenAI 178ms，统一之后每轮省下这一跳，也少一个断网/限流的单点。
+
+        没注入时保持原样（默认就是 OpenAI），所以默认配置的行为和已有向量都不变。
+        """
+        if self._embedder is not None:
+            return self._embedder.embed_query_text(text) if hasattr(
+                self._embedder, "embed_query_text") else self._embedder.embed_texts([text])[0]
         # 跟左脑共用一份缓存：这里要的实体（'坚果'/'素食主义者'/'用户'）左脑刚
         # embed 过一轮，一模一样的字符串没必要再发一次。
         from voicemem.utils.common import embed_cache
