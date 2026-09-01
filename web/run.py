@@ -1187,6 +1187,22 @@ def fill_tags(payload: dict, text: str, audio_path: str = "",
     · 情绪：用 anchor_router 的关键词表现算一次（纯查表）。
     · 实体：这一轮命中的那几条记忆在认知图里挂了哪些实体，直接读（纯 sqlite）。
     """
+    # ⓪ 右脑那几条换成第一人称的人话（只换显示，raw 原文照旧留着给脑图匹配）。
+    #    还没改写好的这一轮先显示原文，同时排进后台队列——见 rb_human。
+    for h in payload.get("right_brain_hits") or []:
+        claim = h.get("claim") or ""
+        if not claim:
+            continue
+        human = rb_human(claim)
+        if human and human != claim:
+            # 证据那半截（"｜他说过：…"）保留，它才是"你凭什么这么说"的支撑。
+            tail = ""
+            for sep in ("｜他说过：", " | he said: "):
+                if sep in h.get("content", ""):
+                    tail = sep + h["content"].split(sep, 1)[1]
+                    break
+            h["content"] = human + tail
+
     # ① 人明说了情绪就按他说的（查表，0 网络）——最准
     if not payload.get("emotion") and text.strip():
         try:
@@ -1992,6 +2008,82 @@ RB_ENTITIES_PER_SLOT = int(os.environ.get("VOICEMEM_RB_GRAPH_PER_SLOT", "6"))
 LB_ENTRIES_PER_SLOT = int(os.environ.get("VOICEMEM_LB_GRAPH_PER_SLOT", "7"))
 
 
+# ── 右脑判断的「人话」版本 ────────────────────────────────────────────────────
+# 库里存的 claim 是给**模型**看的：紧凑、第三人称、像标签（"Facing a lot of
+# pressure recently"）。那份不能动——prompt 需要的就是这种密度。
+# 但页面上是给**人**看的，同一句话摆出来就很像在读档案。这里做一份只用于显示的
+# 第一人称改写。
+#
+# 异步 + 缓存：memory_snapshot 是同步的，不能在里面等一次 LLM 往返。所以第一次
+# 显示原文，后台改写完落进缓存，前端下一次轮询（watchMemories 本来就在轮）就换成
+# 人话。改写只碰措辞，不新增任何事实。
+_RB_HUMAN: dict = {}          # claim 原文 -> 人话版本
+_RB_HUMAN_PENDING: set = set()
+#: 关掉就一直显示原始 claim（不想为显示花钱时）。
+RB_HUMANIZE = os.environ.get("VOICEMEM_RB_HUMANIZE", "1") != "0"
+
+_RB_HUMANIZE_PROMPT = (
+    "下面每行是一条「关于某个人的判断」，是一个长期陪着他的语音助手记下来的。\n"
+    "把每一条改写成这个助手会说出口的话：第一人称、口语、像在跟朋友描述他，"
+    "不超过 25 个字。\n"
+    "只改措辞，**不许新增任何事实**，也不要评价或安慰。原文是什么语言就用什么语言。\n"
+    "逐行输出，行数和顺序跟输入完全一致，不要编号、不要引号、不要多余的话。\n"
+    "例：\n"
+    "  输入  最近压力很大\n"
+    "  输出  他这阵子压力挺大的\n"
+    "  输入  Strict about nuts and vegetarian food\n"
+    "  输出  He's careful about nuts, and he keeps it vegetarian\n"
+)
+
+
+def _rb_humanize_now(claims: list) -> None:
+    """后台线程里跑：一次 LLM 往返改写一批，结果落进 _RB_HUMAN。"""
+    try:
+        from openai import OpenAI
+        r = OpenAI().chat.completions.create(
+            model=utils.CHAT_MODEL, temperature=0.7,
+            messages=[{"role": "system", "content": _RB_HUMANIZE_PROMPT},
+                      {"role": "user", "content": "\n".join(claims)}],
+        )
+        lines = [x.strip() for x in (r.choices[0].message.content or "").splitlines() if x.strip()]
+        if len(lines) != len(claims):      # 行数对不上就整批丢弃，别错位配对
+            print(f"[rb] 改写行数不符（{len(lines)}≠{len(claims)}），这批跳过", flush=True)
+            return
+        for c, h in zip(claims, lines):
+            _RB_HUMAN[c] = h
+    except Exception as e:
+        print(f"[rb] 判断改写失败：{type(e).__name__}: {e}", flush=True)
+    finally:
+        _RB_HUMAN_PENDING.difference_update(claims)
+
+
+def rb_human(claim: str) -> str:
+    """显示用的那句话。还没改写好就先返回原文，同时排上队。"""
+    if not RB_HUMANIZE or not claim:
+        return claim
+    hit = _RB_HUMAN.get(claim)
+    if hit:
+        return hit
+    if claim not in _RB_HUMAN_PENDING:
+        _RB_HUMAN_PENDING.add(claim)
+        import threading
+        threading.Thread(target=_rb_humanize_now, args=([claim],), daemon=True).start()
+    return claim
+
+
+def rb_human_batch(claims: list) -> None:
+    """一次把缺的都排上队——脑图一屏几十条，一条一个线程太浪费。"""
+    if not RB_HUMANIZE:
+        return
+    todo = [c for c in dict.fromkeys(claims)
+            if c and c not in _RB_HUMAN and c not in _RB_HUMAN_PENDING]
+    if not todo:
+        return
+    _RB_HUMAN_PENDING.update(todo)
+    import threading
+    threading.Thread(target=_rb_humanize_now, args=(todo,), daemon=True).start()
+
+
 def right_brain_tree(uid, facts):
     """脑图右半球：slot → 判断 → 证据。
 
@@ -2004,12 +2096,17 @@ def right_brain_tree(uid, facts):
         print(f"[web] 判断表读取失败：{type(e).__name__}: {e}", flush=True)
         return []
 
+    traits = list(store.all(uid, per_slot=RB_ENTITIES_PER_SLOT))
+    rb_human_batch([t.claim for t in traits])     # 缺的一次排队，见 rb_human
     out = []
-    for t in store.all(uid, per_slot=RB_ENTITIES_PER_SLOT):
+    for t in traits:
         out.append({
             "cluster": t.cluster,
             "slot": t.slot,
-            "text": t.claim,          # 节点标题 = 那句判断
+            # 节点标题用人话版；还没改写好就是原文，下一次轮询会换上来。
+            # raw 留着——前端拿它跟每轮命中做匹配，换成人话就对不上了。
+            "raw": t.claim,
+            "text": rb_human(t.claim),
             "desc": "",               # 判断本身就是概括，不再垫一行原始事实
             "notes": [{"text": e.quote, "emotion": e.emotion, "cause": e.cause}
                       for e in t.evidence],

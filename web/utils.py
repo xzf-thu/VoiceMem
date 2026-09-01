@@ -134,6 +134,9 @@ def hits_payload(result, has_audio=None, cluster_of=None):
                               # 节点从来不亮、左右脑之间也就没有射线。把 slot 名带上，
                               # 前端好把它落到该 slot 下的节点。
                               "slot": ((getattr(h, "metadata", None) or {}).get("slot_name") or ""),
+                              # 判断原文。页面显示的是它的第一人称改写版（run.py 的
+                              # rb_human），这里留一份原文给改写和脑图匹配用。
+                              "claim": ((getattr(h, "metadata", None) or {}).get("claim") or ""),
                               "source": h.source, "priority": h.priority,
                               "cluster": cluster_of(h.content, h.source) if cluster_of else ""}
                              for h in (getattr(result, "rb_hits", None) or [])],
