@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <a href="wechat.jpg">
+  <a href="wechat.png">
     <img src="https://img.shields.io/badge/WeChat-Join%20Group-07C160?logo=wechat&logoColor=white" alt="WeChat">
   </a>
   <a href="https://x.com/XieZhifei14110">
@@ -34,7 +34,7 @@
   </a>
 </div>
 <p align="center">
-  <img src="assets/wechat.jpg" alt="VoiceMem 微信群" width="60%">
+  <img src="assets/wechat.png" alt="VoiceMem 微信群" width="60%">
 </p>
 
 ---
@@ -418,7 +418,7 @@ VoiceMem 基于 **Apache License 2.0** 开源。
 </p>
 
 <p align="center">
-  <a href="wechat.jpg">
+  <a href="wechat.png">
     <img src="https://img.shields.io/badge/WeChat-Join%20Group-07C160?logo=wechat&logoColor=white" alt="WeChat">
   </a>
   <a href="https://x.com/XieZhifei14110">
@@ -430,7 +430,7 @@ VoiceMem 基于 **Apache License 2.0** 开源。
 </p>
 
 <p align="center">
-  <img src="assets/wechat.jpg" alt="VoiceMem WeChat Group" width="60%">
+  <img src="assets/wechat.png" alt="VoiceMem WeChat Group" width="60%">
 </p>
 
 ---
