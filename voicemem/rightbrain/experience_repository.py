@@ -84,12 +84,14 @@ class ExperienceRepository:
         uid     = plan.user_id
         sigs    = plan.current_signals
 
-        # 1. Response Experience（失败/成功经验）
-        #    dissatisfaction/correction 时优先级更高
-        exp_limit = experience_limit + (1 if sigs.dissatisfaction_signal or sigs.correction_signal else 0)
-        experiences = self._store.search_by_anchors(
-            uid, anchors, memory_class="response_experience", limit=exp_limit,
-        )
+        # 1. response_experience 这一类**不再写入、也不再检索**（见 brain.py 的
+        #    learn_from_reaction）：它只有写没有读——真正有用的 next_time 存进了
+        #    metadata、没有任何读取方；进 prompt 的 assistant_did 长成"助手用轻松的
+        #    语气引导用户"，每轮占一个名额却给不出信息。助手该怎么做本来就能从用户
+        #    侧特征推出来（「他低落时想要理解和认同」已经说明该给什么了）。
+        #    这里返回空列表而不是删掉整条通路：老库里已经存下的那些不该突然变成
+        #    没人处理的孤儿，类型和前端兼容都还在。
+        experiences: list = []
 
         # 2. heartnote
         patterns = self._store.search_by_anchors(

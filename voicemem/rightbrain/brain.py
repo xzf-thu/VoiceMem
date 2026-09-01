@@ -286,7 +286,9 @@ def _rb_trait_hits(store, user_id: str, query: str, top_k: int = 4) -> list["Rig
 #: 已经跟查询相关了，所以席位放宽到 3；response_experience 仍是查询无关的内部
 #: 笔记，维持 1 席。
 _SOURCE_QUOTA = {
-    "response_experience": max(0, int(os.environ.get("VOICEMEM_RB_RESPONSE_MAX", "1"))),
+    # 0 = 不进 prompt。这一类已停写停检（见 learn_from_reaction 的说明），
+    # 名额留着只为老库里那些还能被显示层认出来；想看老数据设成 1。
+    "response_experience": max(0, int(os.environ.get("VOICEMEM_RB_RESPONSE_MAX", "0"))),
     "profile": max(0, int(os.environ.get("VOICEMEM_RB_PROFILE_MAX", "3"))),
 }
 
@@ -662,9 +664,6 @@ class RightBrain:
 
 {{"significant": bool,
   "assistant_helped": "助手那句帮到用户了(true)还是帮了倒忙(false)",
-  "assistant_did": "主语必须是助手：助手那句用了什么做法，可迁移不抄原话，"
-                   "如「直接给了分点方案」「先接住情绪再问细节」",
-  "next_time": "助手以后遇到类似情形怎么做（可执行的动作）",
   "user_reaction": "主语必须是用户：用户的反应",
   "why": "为什么这么反应（落到助手那句的哪一点）",
   "user_trait": {{"slot": "表达风格|应对方式|思维模式|喜好与厌恶", "label": "这个反应
@@ -722,13 +721,19 @@ significant 不管真假，其余字段都要照填（调用方另有判定）�
     def learn_from_reaction(self, text: str, emotion: str, entities, agent_reply: str,
                             memory_id: str | None = None, observed_at=None,
                             heartnote_id: str | None = None) -> None:
-        """(助手上一句 + 用户这轮) → 情绪归因，有必要才落一条 response_experience。
+        """(助手上一句 + 用户这轮) → 情绪归因，有必要才往判断层挂一条特征。
 
-        产物分两处存，因为它们是两类东西：
-          · 助手侧「做法 + 下次怎么做」→ response_experience（content 存可迁移的
-            做法，存原话换个话题就用不上；next_time 进 metadata）
-          · 用户侧「透露出的长期特征」→ 图层 slot（表达风格/应对方式…），由归因
-            归纳成人格描述，跨话题都能用
+        只有**一个出口**：用户侧「透露出的长期特征」→ 判断层的 5 个 slot
+        （应对方式/表达风格/思维模式/喜好与厌恶），跨话题都能用。抽不出长期
+        特征（只是这一次的情境反应）就不挂，不硬凑。
+
+        原来还有第二个出口：助手侧的「做法 + 下次怎么做」写成 response_experience。
+        那条线**只有写没有读**——`next_time`（真正有用的那半）存进了 metadata，
+        全仓库没有任何读取方；进 prompt 的是 `assistant_did`，实际长成
+        "The assistant uses a relaxed tone to guide the user"，每轮占一个
+        _SOURCE_QUOTA 名额却给不出信息。
+        而助手该怎么做本来就能从用户侧特征推出来——「他低落时想要理解和认同」
+        已经等于告诉助手该给什么了，不必单独存一份。所以这条线整条去掉。
 
         不受 write() 那个 ``if not emotion`` 管——"不是这个意思"是行为信号，跟声学
         情绪有没有输出无关（text_mode 下 emotion 常为空）。没有助手上一句直接返回，
@@ -749,51 +754,12 @@ significant 不管真假，其余字段都要照填（调用方另有判定）�
                 s = str(v or "").strip()
                 return s if len(s) <= self._EXPERIENCE_MAX_CHARS else s[:self._EXPERIENCE_MAX_CHARS] + "…"
 
-            what_i_did = _clip(attribution.get("assistant_did")) or _clip(reply)
-            reaction   = _clip(attribution.get("user_reaction"))
-            why        = _clip(attribution.get("why"))
-            next_time  = _clip(attribution.get("next_time"))
-            failed     = not bool(attribution.get("assistant_helped", False))
+            failed = not bool(attribution.get("assistant_helped", False))
+            print(f"[RBReaction] {'失败' if failed else '有效'}："
+                  f"{_clip(attribution.get('user_reaction'))}", flush=True)
 
-            en = _is_en_text(text)
-            condition = (f"{reaction}{' — ' + why if why else ''}" if en
-                         else f"{reaction}{'；' + why if why else ''}")
-
-            # global_style：每个查询计划都带这个兜底锚点，所以这条教训每轮都捞得到
-            # ——"别再这么回应"不该等同一话题重现才想起来。情绪/实体再叠话题相关性。
-            anchors = [
-                MemoryAnchor(anchor_type="global_style", anchor_id="global_style",
-                             role="global_profile", weight=1.0, confidence=1.0),
-            ]
-            canonical = normalize_emotion_strict(emotion) if emotion else None
-            if canonical is not None:
-                anchors.append(MemoryAnchor(anchor_type="emotion", anchor_id=canonical,
-                                            role="trigger", weight=1.0, confidence=1.0))
-            for name in (entities or []):
-                key = str(name).lower().strip()
-                if key:
-                    anchors.append(MemoryAnchor(anchor_type="entity", anchor_id=key,
-                                                role="subject", weight=0.8, confidence=1.0))
-
-            _obs = (str(observed_at)
-                    if observed_at and re.match(r"^\d{4}-\d{2}-\d{2}", str(observed_at))
-                    else None)
-            exp = self._rb_repo().write_response_experience(
-                self._user_id, what_i_did, anchors,
-                condition=condition,
-                failed=failed,
-                # 反应/原话留底当证据，不进 prompt——用户侧的结论在图层那边
-                metadata={"next_time_policy": next_time, "why": why, "reaction": reaction,
-                          "agent_reply": reply[:300], "user_reaction": text.strip()[:200],
-                          "emotion": emotion or ""},
-                evidence_memory_ids=[memory_id] if memory_id else [],
-                created_at=_obs,
-            )
-            print(f"[RBExperience] {'失败' if failed else '有效'}：{what_i_did}"
-                  f" | 下次：{next_time}", flush=True)
-
-            # 用户侧的观察不留在这条经验里：「这人被直接给方案会关闭」是长期特征，
-            # 该沉淀进图层 slot 由归因归纳成人格，否则只有这条经验被检中才看得见。
+            # 「这人被直接给方案会关闭」是长期特征，沉淀进判断层的 slot，
+            # 由归因归纳成人格描述，跨话题都能用。
             trait = attribution.get("user_trait") or {}
             if isinstance(trait, dict):
                 slot_name, label = str(trait.get("slot") or ""), _clip(trait.get("label"))
@@ -807,7 +773,7 @@ significant 不管真假，其余字段都要照填（调用方另有判定）�
                                      cause_id=memory_id or "", at=str(observed_at or ""))):
                         print(f"[RBTrait] {slot_name} ← {label}", flush=True)
         except Exception as e:
-            print(f"[RBExperience] 回应经验写入失败: {e}")
+            print(f"[RBReaction] 反应归因失败: {e}")
 
     # ── 右脑清洁 ────────────────────────────────────────────────────────────────
 
