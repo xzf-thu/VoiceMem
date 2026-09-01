@@ -2081,7 +2081,7 @@ _RB_HUMANIZE_PROMPT = (
     "把每一条改写成这个小助手会说出来的话。\n"
     "\n"
     "语气：\n"
-    "· 短。十几个字最好，读起来是一句话，不是一条记录。\n"
+    "· 短。观察那半句十几个字最好，读起来是一句话，不是一条记录。\n"
     "· 有温度，带一点点护着他的意思——是心疼，不是分析。\n"
     "· **不要用「我发现」「我注意到」「在我看来」开头**，那是汇报的口气。"
     "直接说那件事，或者说你替他觉得怎么样。\n"
@@ -2092,6 +2092,17 @@ _RB_HUMANIZE_PROMPT = (
     "· **必须换一种说法**。原句是概括性的词（「简短回应」「寻求认同」），"
     "要还原成人会怎么形容（「话就变少了」「想有人接住他」）。\n"
     "· 但**不许新增任何事实**：不补细节、不猜原因、不加评价。换措辞，不换内容。\n"
+    # 关键区分：往用户身上加事实=幻觉；说**我自己**打算怎么做=助手的立场，安全。
+    # 而且这一半只在页面上显示，不进模型的 prompt，说错了也影响不到回答。
+    "· 观察之后，可以再跟一句**你自己打算怎么做**，用「 —— 」隔开。"
+    "只说你的做法（「我不追问」「我让他说完」），"
+    "**不许再多说一句关于他的事**。\n"
+    # 不加这条会写出"我帮他找个安静的地方复习"——语音助手做不到，读着就假。
+    "· 你能做的只有**说话**这一件事：怎么开口、先提什么、避开什么、"
+    "什么时候闭嘴。不要承诺现实世界里的行动（找地方、订闹钟、帮他做事），"
+    "你做不到。\n"
+    "· 这后半句是可选的：想不出自然的做法就只留观察，别硬凑。"
+    "十条里有三四条带上就够了，条条都带会像在背守则。\n"
     "· 全部用{lang}输出，不管原文是什么语言。\n"
     "\n"
     "逐行输出，行数和顺序跟输入完全一致；不要编号、引号或多余的话。\n"
@@ -2106,23 +2117,27 @@ _RB_HUMANIZE_PROMPT = (
 _RB_HUMANIZE_EXAMPLES = {
     "zh": (
         "  输入  在焦虑时倾向于简短回应\n"
-        "  输出  {who}一紧张就闷声不响\n"
+        "  输出  {who}一紧张就闷声不响 —— 我不追问，等他自己开口\n"
+        "  输入  考试时容易走神\n"
+        "  输出  {who}考试时容易走神 —— 这事我不主动提，怕他更焦虑\n"
         "  输入  在情绪低落时不喜欢被忽视\n"
         "  输出  {who}难过的时候，最怕没人理\n"
         "  输入  Feels accomplished when recognized\n"
         "  输出  夸{who}一句，他整个人就亮了\n"
         "  输入  Hates being interrupted\n"
-        "  输出  打断{who}说话，他立刻就不说了\n"
+        "  输出  打断{who}说话，他立刻就不说了 —— 我尽量让他讲完\n"
     ),
     "en": (
         "  输入  在焦虑时倾向于简短回应\n"
-        "  输出  {who} goes quiet the moment he tenses up\n"
+        "  输出  {who} goes quiet the moment he tenses up —— I don't push, I wait\n"
+        "  输入  考试时容易走神\n"
+        "  输出  {who}'s mind wanders in exams —— I won't bring it up, it'd only add pressure\n"
         "  输入  在情绪低落时不喜欢被忽视\n"
         "  输出  When {who} is down, being ignored is the worst of it\n"
         "  输入  Feels accomplished when recognized\n"
         "  输出  A little praise and {who} lights right up\n"
         "  输入  Hates being interrupted\n"
-        "  输出  Cut {who} off mid-sentence and you'll lose him\n"
+        "  输出  Cut {who} off mid-sentence and you'll lose him —— I let him finish\n"
     ),
 }
 
