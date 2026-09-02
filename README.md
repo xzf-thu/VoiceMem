@@ -29,6 +29,16 @@
 </p>
 
 <div align="center">
+  <a href="https://star-history.dera.page/#xzf-thu/VoiceMem&type=date&legend=top-left">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=xzf-thu/VoiceMem&type=date&theme=dark&legend=top-left" />
+      <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=xzf-thu/VoiceMem&type=date&legend=top-left" />
+      <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=xzf-thu/VoiceMem&type=date&legend=top-left" />
+    </picture>
+  </a>
+</div>
+
+<div align="center">
   <a href="https://xzf-thu.github.io/VoiceMem/">
     <img src="assets/huggingface_paper_gold_day.svg"/>
   </a>
@@ -428,6 +438,16 @@ VoiceMem 基于 **Apache License 2.0** 开源。
     <img src="https://img.shields.io/badge/Personal-Contact-blue" alt="Personal Contact">
   </a>
 </p>
+
+<div align="center">
+  <a href="https://star-history.dera.page/#xzf-thu/VoiceMem&type=date&legend=top-left">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=xzf-thu/VoiceMem&type=date&theme=dark&legend=top-left" />
+      <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=xzf-thu/VoiceMem&type=date&legend=top-left" />
+      <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=xzf-thu/VoiceMem&type=date&legend=top-left" />
+    </picture>
+  </a>
+</div>
 
 <p align="center">
   <img src="assets/wechat.png" alt="VoiceMem WeChat Group" width="60%">
