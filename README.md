@@ -28,15 +28,6 @@
   </a>
 </p>
 
-<div align="center">
-  <a href="https://star-history.dera.page/#xzf-thu/VoiceMem&type=date&legend=top-left">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=xzf-thu/VoiceMem&type=date&theme=dark&legend=top-left" />
-      <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=xzf-thu/VoiceMem&type=date&legend=top-left" />
-      <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=xzf-thu/VoiceMem&type=date&legend=top-left" />
-    </picture>
-  </a>
-</div>
 
 <div align="center">
   <a href="https://xzf-thu.github.io/VoiceMem/">
@@ -84,6 +75,7 @@ https://github.com/user-attachments/assets/0d919f8c-e9ba-4fdb-8078-b049e4b99a28
 * [🔌 使用 VoiceMem 定制你的语音智能体](#-使用-voicemem-定制你的语音智能体)
 * [🛠️ 模型微调](#️-模型微调)
 * [📊 评测代码](#-评测)
+* [📖 引用](#-引用)
 * [致谢](#致谢)
 * [许可证](#许可证)
 
@@ -268,7 +260,6 @@ VoiceMem 不把所有记忆放进同一个检索数据库，而是将记忆拆�
 * 💰 **低 Token 消耗** — 每次只使用 **430 个记忆 token**，Mem0 为 **6,956**，EverMemOS 为 **1,899**。
 
 
-
 ## 🤖 VoiceMem 模型系列
 
 我们通过三阶段 OPD 训练流程构建 **ChatMem-400K**：
@@ -386,6 +377,30 @@ python evaluation/run.py \
 
 完整评测流程，以及添加新 Benchmark 的方法，请参阅 **[evaluation/README.md](evaluation/README.md)**。添加一个新的 Benchmark 只需要增加一个文件并实现两个函数。
 
+## 📖 引用
+
+如果 VoiceMem 对你的研究有帮助，请引用我们的论文：
+
+```bibtex
+@misc{2608.26005,
+  author = {Zhifei Xie and Jiaqi Lang and Ze An and Yifan Zhao and Dongchao Yang and Kai Li and Ziyang Ma and Mingbao Lin and Chunyan Miao and Shuicheng Yan},
+  title = {{V}oice{M}em: {S}treaming {D}ual-{B}rain {M}emory for {R}eal-{T}ime {I}nteraction},
+  year = {2026},
+  eprint = {2608.26005},
+  note = {arXiv:2608.26005v1}
+}
+```
+
+<div align="center">
+  <a href="https://star-history.dera.page/#xzf-thu/VoiceMem&type=date&legend=top-left">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=xzf-thu/VoiceMem&type=date&theme=dark&legend=top-left" />
+      <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=xzf-thu/VoiceMem&type=date&legend=top-left" />
+      <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=xzf-thu/VoiceMem&type=date&legend=top-left" />
+    </picture>
+  </a>
+</div>
+
 ## 致谢
 
 我们感谢以下优秀的开源项目：
@@ -439,15 +454,6 @@ VoiceMem 基于 **Apache License 2.0** 开源。
   </a>
 </p>
 
-<div align="center">
-  <a href="https://star-history.dera.page/#xzf-thu/VoiceMem&type=date&legend=top-left">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=xzf-thu/VoiceMem&type=date&theme=dark&legend=top-left" />
-      <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=xzf-thu/VoiceMem&type=date&legend=top-left" />
-      <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=xzf-thu/VoiceMem&type=date&legend=top-left" />
-    </picture>
-  </a>
-</div>
 
 <p align="center">
   <img src="assets/wechat.png" alt="VoiceMem WeChat Group" width="60%">
@@ -489,6 +495,7 @@ https://github.com/user-attachments/assets/0d919f8c-e9ba-4fdb-8078-b049e4b99a28
 * [🔌 Customize Your Voice Agent with VoiceMem](#-customize-your-voice-agent-with-voicemem)
 * [🛠️ Finetuning](#️-finetuning)
 * [📊 Evaluation](#-evaluation)
+* [📖 Citation](#-citation)
 * [Acknowledgements](#acknowledgements)
 * [License](#license)
 
@@ -792,6 +799,30 @@ During evaluation, the answering model receives **only the retrieved memories**,
 If the model receives the full conversation, the benchmark becomes a reading-comprehension test rather than an evaluation of the memory system itself.
 
 See **[evaluation/README.md](evaluation/README.md)** for the complete evaluation protocol and instructions for adding a new benchmark. Adding a benchmark only requires one file and two functions.
+
+## 📖 Citation
+
+If VoiceMem is useful for your research, please cite our paper:
+
+```bibtex
+@misc{2608.26005,
+  author = {Zhifei Xie and Jiaqi Lang and Ze An and Yifan Zhao and Dongchao Yang and Kai Li and Ziyang Ma and Mingbao Lin and Chunyan Miao and Shuicheng Yan},
+  title = {{V}oice{M}em: {S}treaming {D}ual-{B}rain {M}emory for {R}eal-{T}ime {I}nteraction},
+  year = {2026},
+  eprint = {2608.26005},
+  note = {arXiv:2608.26005v1}
+}
+```
+
+<div align="center">
+  <a href="https://star-history.dera.page/#xzf-thu/VoiceMem&type=date&legend=top-left">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=xzf-thu/VoiceMem&type=date&theme=dark&legend=top-left" />
+      <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=xzf-thu/VoiceMem&type=date&legend=top-left" />
+      <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=xzf-thu/VoiceMem&type=date&legend=top-left" />
+    </picture>
+  </a>
+</div>
 
 ## Acknowledgements
 
