@@ -220,6 +220,11 @@ def describe(memory_root, *, user_id: str = "", mode: str = "",
             "user_id": user_id or (old.get("space") or {}).get("user_id", ""),
             "mode": mode or (old.get("space") or {}).get("mode", ""),
             "counts": counts or (old.get("space") or {}).get("counts", {}),
+            # 这个空间用什么语言（"en" / "zh"）。建的时候定一次，之后不再变——
+            # 记忆和回复都跟着它。检索是按向量做的，一个库里中英混存会让一半
+            # 记忆检索不到，所以语言是**库的属性**，不是单句的属性。
+            # 跟 created_at 一样从 old 里继承：这个文件每次打开空间都会重写。
+            "language": (old.get("space") or {}).get("language", ""),
         },
         "left_brain": {
             "role": "事实记忆：说了什么、什么时候、涉及谁",

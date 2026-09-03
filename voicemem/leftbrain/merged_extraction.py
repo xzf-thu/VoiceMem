@@ -94,7 +94,60 @@ Additionally, for EACH item in "memory", include these three fields:
 And add ONE top-level field "traits": subjective things this utterance reveals about
 the speaker. Each item {{"slot": "...", "label": "<5-15 chars>"}}, slot is one of:
 
-  情绪        WHEN they feel WHAT — the situation plus the feeling it triggers.
+{traits_body}
+
+Outside that case, only include a category the utterance clearly shows —
+for a one-off event or a plain question, "traits": [] is the right answer.
+
+Each label becomes the TITLE of a node on a graph, so write it as a short
+pattern — roughly 5-15 characters (or 3-8 words), no subject, no full stop.
+
+{label_rule}
+
+Copy the SHAPE of these, never the wording:
+{label_examples}
+
+Also add ONE top-level field "emotion": how the speaker feels, as a SINGLE
+word, in the speaker's own language (中文：愉悦/开心/平静/焦虑/难过/委屈/愤怒/
+惊讶/疲惫/失望…; English: glad/calm/anxious/sad/wronged/angry/tired/…).
+**Judge from what they actually say.** "我喜欢草莓" is 愉悦, not 悲伤;
+"我好生气啊" is 愤怒, not 焦虑. If the utterance carries no clear feeling
+(a plain fact, a question), return "" — an empty string is the right answer
+far more often than a guess. A wrong label is worse than none: it gets shown
+to the user as 【label】 next to their own words.
+
+Never invent entities, traits or feelings that are not in the text.
+
+Keep one-off requests OUT of "memory": asking for a recommendation, asking what
+you remember about them, asking you to do something right now. When the same
+sentence ALSO states a lasting fact, write only the lasting half — never both in
+one item. "我下周要考GRE，你有什么书推荐吗" gives exactly one memory,
+「用户下周要参加GRE考试」, and nothing about the book request.
+
+OUTPUT SHAPE — your JSON object must have EXACTLY these three top-level keys:
+{{"memory": [...], "emotion": "...", "traits": [...]}}
+The prompt above describes only the "memory" key. "emotion" and "traits" are
+REQUIRED as well; omitting them is an error. Use "" and [] when there is nothing.
+
+════════════════════════════════════════════════════════════════════════
+LANGUAGE — this overrides every example above.
+{label_rule}
+It applies to EVERY string you output: the "memory" texts, every trait
+"label", and "emotion". The only exception is "slot", which is an internal
+key and must stay exactly as listed (情绪 / 应对方式 / 表达风格 / 思维模式 /
+喜好与厌恶). If the speaker wrote in English, every one of those strings must
+be English — copying the Chinese wording from the examples is a mistake.
+════════════════════════════════════════════════════════════════════════"""
+
+
+#: 示例只给**一种**语言，而且要跟这一轮说的话同语言。
+#:
+#: 曾经把中英示例并列写进去，结果比只有中文示例更糟：模型连左脑的事实都跟着写
+#: 成中文了。示例对输出的牵引力比规则强得多——所以规则要留，但示例必须先选对。
+#: traits 说明块的中英两份。整块换，不只换末尾那组好/差示例——slot 说明里
+#: 自带的例子（"评审前会紧张""被打断就烦"）才是模型照抄的来源，实测只改末尾
+#: 那组没用，英文输入照样存中文。
+_TRAITS_BODY = {"zh": """  情绪        WHEN they feel WHAT — the situation plus the feeling it triggers.
               "评审前会紧张", "被打断就烦", "项目延期会焦虑"
   应对方式     what they DO about a feeling, or how they want to be treated.
               "压力大时想被安抚", "难受时想一个人待着"
@@ -118,35 +171,44 @@ Do not skip it just because the same content also went into "memory": "memory"
 records WHAT HAPPENED, "traits" records WHAT THIS PERSON IS LIKE, and one
 sentence very often carries both.
 
-Outside that case, only include a category the utterance clearly shows —
-for a one-off event or a plain question, "traits": [] is the right answer.
+""", "en": """  情绪        WHEN they feel WHAT — the situation plus the feeling it triggers.
+              "tense before design reviews", "annoyed when interrupted",
+              "anxious when a project slips"
+  应对方式     what they DO about a feeling, or how they want to be treated.
+              "wants comfort under stress", "needs to be alone when upset"
+  表达风格     habits of speaking and communicating
+  思维模式     how they think, weigh things, decide
+  喜好与厌恶   what they like or dislike
 
-Each label becomes the TITLE of a node on a graph, so write it as a short
-pattern — 5-15 Chinese characters, no subject, no full stop:
-  好：讨厌被打断 / 压力大时想被安抚 / 先要结论再要解释
-  差：用户倾向于详细规划和结构化思考。（带主语的整句）
-  差：我是计算机专业（照抄原话/事实）
+情绪 vs 应对方式 is the one people get wrong: "annoyed when interrupted" is 情绪
+(a feeling appearing), "walks away when interrupted" is 应对方式 (an action
+taken). If the label has no verb of doing or wanting in it, it is 情绪.
 
-Also add ONE top-level field "emotion": how the speaker feels, as a single
-Chinese word (愉悦/开心/平静/焦虑/难过/委屈/愤怒/惊讶/疲惫/失望 …).
-**Judge from what they actually say.** "我喜欢草莓" is 愉悦, not 悲伤;
-"我好生气啊" is 愤怒, not 焦虑. If the utterance carries no clear feeling
-(a plain fact, a question), return "" — an empty string is the right answer
-far more often than a guess. A wrong label is worse than none: it gets shown
-to the user as 【label】 next to their own words.
+For "情绪" the label must read as **a pattern, not a bare feeling word**:
+"tense before design reviews", "annoyed when interrupted", "calm when alone"
+— NOT "anxious" / "happy". It becomes the title of a node on a graph; a bare
+word tells the user nothing.
 
-Never invent entities, traits or feelings that are not in the text.
+When the utterance states a RECURRING tendency about the speaker — "every time
+…", "always", "never", "I'm the kind of person who…", or any habit/reaction
+that clearly holds beyond this one moment — a trait is REQUIRED. "I zone out in
+long meetings" is 喜好与厌恶 "dislikes long meetings"; "I can't sleep before a
+demo" is 情绪 "can't sleep before a demo".
+Do not skip it just because the same content also went into "memory": "memory"
+records WHAT HAPPENED, "traits" records WHAT THIS PERSON IS LIKE, and one
+sentence very often carries both.
 
-Keep one-off requests OUT of "memory": asking for a recommendation, asking what
-you remember about them, asking you to do something right now. When the same
-sentence ALSO states a lasting fact, write only the lasting half — never both in
-one item. "我下周要考GRE，你有什么书推荐吗" gives exactly one memory,
-「用户下周要参加GRE考试」, and nothing about the book request.
+"""}
 
-OUTPUT SHAPE — your JSON object must have EXACTLY these three top-level keys:
-{{"memory": [...], "emotion": "...", "traits": [...]}}
-The prompt above describes only the "memory" key. "emotion" and "traits" are
-REQUIRED as well; omitting them is an error. Use "" and [] when there is nothing."""
+_EXAMPLES = {
+    "zh": ("  好：讨厌被打断 / 压力大时想被安抚 / 先要结论再要解释\n"
+           "  差：用户倾向于详细规划和结构化思考。（带主语的整句）\n"
+           "  差：我是计算机专业（照抄原话/事实）"),
+    "en": ("  good: hates being interrupted / wants comfort under stress / "
+           "conclusion first\n"
+           "  bad: The user tends to plan in detail. (a full sentence with a subject)\n"
+           "  bad: I major in computer science (copying the utterance / a plain fact)"),
+}
 
 
 def prompt_addendum() -> str:
@@ -159,4 +221,9 @@ def prompt_addendum() -> str:
     最后那段 OUTPUT SHAPE 就是为此显式重申顶层结构，别删。
     """
     from voicemem.leftbrain.cognitive_graph.slot_v2 import ALL_SLOT_V2_VALUES
-    return PROMPT_ADDENDUM.format(slots=", ".join(ALL_SLOT_V2_VALUES))
+    from voicemem.lang import label_rule, memory_language
+    key = memory_language()
+    return PROMPT_ADDENDUM.format(slots=", ".join(ALL_SLOT_V2_VALUES),
+                                  label_rule=label_rule(),
+                                  label_examples=_EXAMPLES[key],
+                                  traits_body=_TRAITS_BODY[key])

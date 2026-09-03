@@ -13,6 +13,7 @@ tests/*
 
 # 运行时数据：记忆库、评测结果、录音归档
 results/
+/rtc_gateway/voicemem-rtc
 memory/
 out/
 
@@ -29,17 +30,8 @@ out/
 *.pth
 *.safetensors
 *.bin
-# 按用途分的模型目录（连同 tokens.txt / test_wavs 这些随包资产一起）；
-# models/ 下的内容全部由 scripts/download_models.sh 拉取，不进仓库
-models/vad/
-models/asr/
-models/speaker/
-models/embedding/
-models/scene/
-models/emotion/
-models/tts/
-models/slm/
-models/reply_adapter/
+# models/ 下的内容由下载脚本或运行时缓存生成，不进仓库
+/models/
 
 # 本地演示分叉与个人种子脚本
 demo_local/
@@ -54,10 +46,16 @@ examples/example_memory/
 # 记忆空间：**目录结构**进仓库，里面的数据不进。
 # clone 下来是两个空文件夹——demo（跑 demo 用）和 myvoicemem（你自己的），
 # 谁跑谁自己积累，不把任何人的记忆推上去。
+# Memory Space：只提交空目录，**任何记忆内容都不进仓库**。
+# 一种语言一个空间（demo-zh / demo-en）——检索是按向量做的，中英混在一个库里
+# 会让一半记忆检索不到。demo 启动时按语言落到对应空间，右上角切语言就换库。
 voicemem_memoryspace/*
-!voicemem_memoryspace/demo/
+!voicemem_memoryspace/demo-zh/
+!voicemem_memoryspace/demo-en/
 !voicemem_memoryspace/myvoicemem/
-voicemem_memoryspace/demo/*
+voicemem_memoryspace/demo-zh/*
+voicemem_memoryspace/demo-en/*
 voicemem_memoryspace/myvoicemem/*
-!voicemem_memoryspace/demo/.gitkeep
+!voicemem_memoryspace/demo-zh/.gitkeep
+!voicemem_memoryspace/demo-en/.gitkeep
 !voicemem_memoryspace/myvoicemem/.gitkeep

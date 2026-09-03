@@ -181,7 +181,7 @@ _REPLY_DEMO_KEYS = ("llm", "tts", "realtime")
 _KNOWN_TOP = {
     "api_key", "base_url", "mode", "memory_root", "user_id", "space", "models",
     "embedding", "slots", "vad", "memory_engine", "llm", "tts", "reply",
-    "top_k",
+    "top_k", "memory_language",
 }
 
 
@@ -247,6 +247,8 @@ def build_kwargs(config: dict) -> dict:
         kwargs["space"] = config["space"]
     if config.get("top_k") is not None:
         kwargs["top_k"] = config["top_k"]
+    if config.get("memory_language") is not None:
+        kwargs["memory_language"] = config["memory_language"]
 
     # ── models：五个角色的模型名，每个都能单独选（chat / reply / embedding /
     #    tts / realtime，见 voicemem/llm_config.py）。比下面各组件段里的 model

@@ -228,6 +228,15 @@ python web/run.py
 http://localhost:8787
 ```
 
+Demo 默认把终端输出（含 Python logging 和 Uvicorn 的日志）保存一份到
+`results/logs/voicemem-时间-PID.log`，每行带时间戳和 stdout/stderr 标记。
+启动时终端会打印实际路径。指定文件或临时关闭如下。
+
+```bash
+python web/run.py --log-file results/logs/debug.log
+python web/run.py --no-file-log
+```
+
 ## 🧠 VoiceMem：基于流式双脑架构的记忆系统
 
 **VoiceMem** 是一个面向实时语音智能体的记忆系统。
@@ -648,6 +657,16 @@ Then open:
 
 ```text
 http://localhost:8787
+```
+
+By default, the demo mirrors terminal output — including Python logging and
+Uvicorn's own logs — to `results/logs/voicemem-TIME-PID.log`, one timestamped
+line per record, tagged stdout or stderr. The resolved path is printed at
+startup. To choose a path or disable file logging:
+
+```bash
+python web/run.py --log-file results/logs/debug.log
+python web/run.py --no-file-log
 ```
 
 ## 🧠 VoiceMem: Memory with a Streaming Dual-Brain Architecture

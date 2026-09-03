@@ -250,6 +250,18 @@ button{cursor:pointer;background:none;border:none}
   background:var(--bg-input);color:var(--txt);font-size:13px}
 .newspace input::placeholder{color:var(--txt-3)}
 .newspace input:focus{outline:none;border-color:var(--blue)}
+/* 语言下拉：不套样式的话用的是浏览器原生外观——深色主题下白底 + 继承来的白字，
+   等于看不见。跟旁边输入框一套配色，appearance:none 去掉原生控件的底色。 */
+.newspace select{padding:8px 28px 8px 11px;border-radius:9px;border:1px solid var(--line);
+  background:var(--bg-input);color:var(--txt);font-size:13px;cursor:pointer;
+  appearance:none;-webkit-appearance:none;
+  background-image:linear-gradient(45deg,transparent 50%,var(--txt-3) 50%),
+                   linear-gradient(135deg,var(--txt-3) 50%,transparent 50%);
+  background-position:calc(100% - 15px) 50%,calc(100% - 10px) 50%;
+  background-size:5px 5px,5px 5px;background-repeat:no-repeat}
+.newspace select:focus{outline:none;border-color:var(--blue)}
+/* 展开的选项列表由系统绘制，只有显式给色才不会跟着系统主题走偏。 */
+.newspace select option{background:var(--bg-input);color:var(--txt)}
 .modal-foot{display:flex;justify-content:flex-end;gap:9px}
 #toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,14px);padding:9px 16px;
   border-radius:10px;background:#2f2f2f;border:1px solid var(--line-2);font-size:13px;
@@ -417,6 +429,12 @@ button{cursor:pointer;background:none;border:none}
     <div class="newspace">
       <input id="spaceNewName" data-i18n-ph="spaceNamePh" placeholder="新空间的名字"
              maxlength="20" spellcheck="false" />
+      <!-- 语言在**建的时候**定一次，之后不能改：记忆和回复都跟着它。一个库里
+           中英混存会让一半记忆检索不到（检索按向量做，中文问句离英文记忆很远）。 -->
+      <select id="spaceNewLang">
+        <option value="en">English</option>
+        <option value="zh">中文</option>
+      </select>
     </div>
     <div class="modal-foot">
       <button class="btn" id="spaceNewCancel" data-i18n="cancel">取消</button>
@@ -1115,6 +1133,7 @@ if($('spaceSel')) $('spaceSel').addEventListener('change',e=>switchSpace(e.targe
    独立的弹窗，不跟「新对话」抢 #mask（那个还得先选空间才能建对话）。 */
 function openSpaceNew(){
   const el=$('spaceNewName'); if(el){ el.value=''; }
+  const lg=$('spaceNewLang'); if(lg){ lg.value='en'; }   // 默认英文
   $('spaceMask').classList.add('on');
   setTimeout(()=>el&&el.focus(),50);
 }
@@ -1124,7 +1143,7 @@ async function doCreateSpace(){
   const el=$('spaceNewName'), name=(el.value||'').trim();
   if(!name){ toast(i18n('needName')); el.focus(); return; }
   const btn=$('spaceNewOk'); btn.disabled=true; btn.textContent=i18n('spaceCreating');
-  const id=await createSpace(name);
+  const id=await createSpace(name, ($('spaceNewLang')||{}).value||'en');
   btn.disabled=false; btn.textContent=i18n('spaceCreate');
   if(!id) return;                       // createSpace 里已经 toast 过原因了
   closeSpaceNew();
@@ -1144,9 +1163,10 @@ if($('spaceMask')) $('spaceMask').addEventListener('click',e=>{
 });
 
 /* 新建一个空的 Memory Space —— 磁盘上出现这个名字的文件夹，记忆从零开始长 */
-async function createSpace(name){
+async function createSpace(name, language){
   const r=await fetch('/api/spaces',{method:'POST',
-    headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name, language:language||'en'})});
   if(!r.ok){
     const msg=r.status===409?i18n('nameTaken'):(r.status===400?i18n('nameBad'):i18n('createFailed'));
     toast(msg); return '';
@@ -1378,7 +1398,7 @@ if($('newSpaceAdd')) $('newSpaceAdd').addEventListener('click',async()=>{
   const el=$('newSpaceName'), name=(el.value||'').trim();
   if(!name){ toast(i18n('needName')); el.focus(); return; }
   const btn=$('newSpaceAdd'); btn.disabled=true; btn.textContent=i18n('spaceCreating');
-  const id=await createSpace(name);
+  const id=await createSpace(name, ($('spaceNewLang')||{}).value||'en');
   btn.disabled=false; btn.textContent=i18n('spaceCreate');
   if(!id) return;
   el.value=''; pickSpace=id; openModal();

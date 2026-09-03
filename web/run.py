@@ -72,10 +72,31 @@ def _parse(argv):
                    help="用哪个 memory space（voicemem_memoryspace/<space>/）")
     p.add_argument("--memory_root", default=os.environ.get("VOICEMEM_MEMORY_ROOT", ""),
                    help="直接指定记忆库目录，给了就盖过 --space")
+    p.add_argument("--lang", choices=["en", "zh"],
+                   default=os.environ.get("VOICEMEM_MEMORY_LANGUAGE", "en"),
+                   help="新建 Memory Space 时用的语言：en（默认）/ zh。"
+                        "已有空间用它自己建的时候定的那个")
+    p.add_argument("--log-file", default=os.environ.get("VOICEMEM_LOG_FILE", ""),
+                   help="日志文件路径；不传则自动写到 results/logs/")
+    p.add_argument("--no-file-log", action="store_true",
+                   default=os.environ.get("VOICEMEM_FILE_LOG", "1") == "0",
+                   help="只输出到终端，不保存日志文件")
     return p.parse_args(argv)
 
 
 ARGS = _parse(None if __name__ == "__main__" else [])
+
+# 必须放在重依赖 import 之前：模型加载、依赖库 warning、Uvicorn 日志和后面所有
+# print 才能从进程启动第一刻起完整落盘。被别的模块 import 时不擅自创建日志文件。
+# 语言：核心默认英文，demo 用 --lang zh 切中文。放在建 VoiceMem 之前，
+# 因为抽取 prompt 是按它选中英两套示例的。
+from voicemem.lang import set_memory_language as _set_lang   # noqa: E402
+_set_lang(ARGS.lang)
+
+LOG_FILE = None
+if __name__ == "__main__" and not ARGS.no_file_log:
+    from logging_utils import setup_file_logging
+    LOG_FILE = setup_file_logging(_ROOT, ARGS.log_file)
 
 import utils                                         # noqa: E402  同目录管道层
 from voicemem import VoiceMem                        # noqa: E402
@@ -200,24 +221,72 @@ _STRANGER = ("说话的不是你认识的那个人——声纹对不上。你对
 #:
 #: 记忆的语言必须跟着一起换，不然库里会中英混着长：同一件事今天记成中文、明天
 #: 记成英文，检索时两边都只能命中一半。
-UI_LANG = "zh"
+UI_LANG = ARGS.lang          # 界面语言。右上角随时可切，跟记忆/回复语言无关
 
 #: 助手说什么语言。原来是跟着**界面语言开关**走（前端把选择存在 localStorage 里，
 #: 每次开页面自动 POST 给后端），结果是：后端默认值永远不生效，上次录英文 demo 切过
 #: 一次，之后全程中文提问也照样英文回答，换库、重启都没用。
 #: 现在改成跟着**用户这句话的语言**走——问什么语言答什么语言，跟界面无关。
-_LANG_MIRROR = ("如果用户用中文问你，就用中文回复。如果用英文问你，就用英文回复。"
-                "其他语言也是一样。")
+#: 回复用哪种语言。跟**当前空间**走，不跟界面走，也不跟用户这一句用什么语言走。
+#:
+#: 原来是"用户说什么语言就回什么语言"。那在单语场景下没问题，但空间是有语言的：
+#: 一个英文库里用户偶尔冒一句中文，助手跟着说中文、这轮记忆也就成了中文，
+#: 库就混了。语言在建空间时定死，这里照着执行。
+_LANG_NOTE = {
+    "zh": "全程用中文回复，即使用户用别的语言问你。",
+    "en": "Always reply in English, even if the user writes in another language.",
+}
+
+
+#: 这个空间用什么语言。**建空间时定一次，之后不再变**。
+#:
+#: 记忆和回复都跟着它，界面语言（UI_LANG）是另一回事，可以随便切。
+#: 为什么不做成随时可切：语言是**库的属性**。检索是按向量做的，中文问句和英文
+#: 记忆在向量空间里离得很远，一个库里中英混存的后果是一半记忆检索不到，而且
+#: 不报错。中途切语言要么把库搞混，要么就得每条存两份——两种都不能接受。
+SPACE_LANG = "en"
+
+
+def space_language(name: str) -> str:
+    """读这个空间建的时候定的语言；老空间没有这个字段就按 en。"""
+    import json as _json
+    d, safe = space_dir(name)
+    f = d / f"{safe}.json"
+    try:
+        v = (_json.loads(f.read_text(encoding="utf-8"))
+             .get("space", {}).get("language", ""))
+        return "zh" if str(v).lower().startswith("zh") else "en"
+    except Exception:
+        return "en"
+
+
+def _write_space_language(name: str, lang: str) -> None:
+    import json as _json
+    d, safe = space_dir(name)
+    f = d / f"{safe}.json"
+    try:
+        doc = _json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+        doc.setdefault("space", {})["language"] = lang
+        f.write_text(_json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"[space] 写语言失败（不影响使用）：{e}", flush=True)
 
 
 def set_lang(lang: str) -> None:
+    """右上角那个选择器：**只切界面语言**。
+
+    记忆语言和回复语言跟着**当前空间**走，不受这里影响——见 SPACE_LANG。
+    界面是中文、正在用的空间是英文库，这是允许的：你可以用中文界面浏览一个
+    英文记忆库。
+    """
     global UI_LANG
     UI_LANG = "en" if str(lang).lower().startswith("en") else "zh"
-    print(f"[lang] 助手改说 {UI_LANG}", flush=True)
+    print(f"[lang] 界面切到 {UI_LANG}（空间「{ACTIVE_SPACE}」仍是 {SPACE_LANG}）",
+          flush=True)
 
 
 def _lang_note() -> str:
-    return _LANG_MIRROR
+    return _LANG_NOTE.get(SPACE_LANG, _LANG_NOTE["en"])
 
 
 _NO_MEMORY_NOTE = (
@@ -951,9 +1020,11 @@ def use_space(name: str) -> str:
     不用把实例一路传下去。注意 build_app 收的那几个回调必须是 lambda 而不是
     ``vm.classify`` 这种绑定方法，绑定方法会把切换前那个实例焊死。
     """
-    global vm, ACTIVE_SPACE
+    global vm, ACTIVE_SPACE, SPACE_LANG
     vm = get_space(name)
     _, ACTIVE_SPACE = space_dir(name)
+    SPACE_LANG = space_language(ACTIVE_SPACE)
+    _set_lang(SPACE_LANG)            # 记忆语言跟着空间走
     return ACTIVE_SPACE
 
 
@@ -974,11 +1045,12 @@ def list_spaces() -> list:
         except Exception:
             n = 0
         out.append({"id": d.name, "name": d.name, "count": n,
-                    "active": d.name == ACTIVE_SPACE, "open": d.name in _SPACES})
+                    "active": d.name == ACTIVE_SPACE, "open": d.name in _SPACES,
+                    "language": space_language(d.name)})
     return out
 
 
-def create_space(name: str) -> dict:
+def create_space(name: str, language: str = "") -> dict:
     """建一个新的空 Memory Space：磁盘上出现这个名字的文件夹，里面是全新的空库。
 
     实例这里就建出来（顺带预热），这样点完"创建"立刻就能对话，不用等第一句话
@@ -989,8 +1061,10 @@ def create_space(name: str) -> dict:
         raise FileExistsError(f"「{safe}」已经存在了")
     d.mkdir(parents=True, exist_ok=True)
     get_space(safe)                      # 建库 + 预热
-    print(f"[space] 新建「{safe}」→ {d}", flush=True)
-    return {"id": safe, "name": safe, "count": 0}
+    lang = "zh" if str(language or ARGS.lang).lower().startswith("zh") else "en"
+    _write_space_language(safe, lang)    # 建的时候定一次，之后不再变
+    print(f"[space] 新建「{safe}」（语言 {lang}）→ {d}", flush=True)
+    return {"id": safe, "name": safe, "count": 0, "language": lang}
 
 
 ACTIVE_SPACE = ""
@@ -1568,6 +1642,52 @@ ECHO_RATIO = float(os.environ.get("VOICEMEM_ECHO_RATIO", "0.6"))
 ECHO_FUZZY_MIN = int(os.environ.get("VOICEMEM_ECHO_FUZZY_MIN", "4"))
 
 
+#: 附和词（backchannel）：听着的人随口应一声，不是要抢话。
+#:
+#: 打断判据是"转写比上次多出 ≥2 个字"，而中文的附和词正好两三个字——实测里
+#: "对嗯""对的对"都把正在播的回复掐了。人一边听一边"嗯""对"是正常的对话行为，
+#: 掐掉反而不自然。realtime 那条路靠 OpenAI 的 semantic_vad 判"这是不是真的在
+#: 打断"来挡，llm_tts 这条没有，只能按词表挡。
+#:
+#: 判据是**新增的这一段整个都是附和词**：说"对，不过我想说的是…"时，新增里
+#: 除了"对"还有别的，照样打断。代价只是纯附和的那次不打断，本来也不该打断。
+BACKCHANNEL_ON = os.environ.get("VOICEMEM_BACKCHANNEL", "1") != "0"
+def _bc_norm(s: str) -> str:
+    """归一化：去掉空格和标点，只留字母数字。词表和输入走同一个函数，
+    免得"got it"（词表里有空格）永远匹配不上"gotit"（输入已去空格）。"""
+    return "".join(ch for ch in (s or "") if ch.isalnum()).casefold()
+
+
+#: 按长度倒序贪心切分，所以"对的"要排在"对"前面。
+_BACKCHANNEL_RAW = {
+    # 中文
+    "嗯嗯", "嗯哼", "对对", "对啊", "对的", "是的", "是啊", "好的", "好呀", "行吧",
+    "知道了", "明白", "懂了", "原来如此", "这样啊",
+    "嗯", "呃", "哦", "噢", "喔", "欸", "诶", "啊", "唉", "对", "是", "好", "行",
+    # 英文
+    "uh-huh", "mhm", "mm-hmm", "yeah", "yep", "yes", "okay", "ok", "right",
+    "sure", "gotcha", "got it", "i see", "cool", "nice", "wow", "hmm", "huh",
+}
+_BACKCHANNEL = sorted({_bc_norm(w) for w in _BACKCHANNEL_RAW}, key=len, reverse=True)
+
+
+def _is_backchannel(new_chars: str) -> bool:
+    """新增的这几个字是不是纯附和。整段都能被词表切完才算。"""
+    if not BACKCHANNEL_ON:
+        return False
+    s = _bc_norm(new_chars)
+    if not s:
+        return False
+    while s:
+        for w in _BACKCHANNEL:
+            if s.startswith(w):
+                s = s[len(w):]
+                break
+        else:
+            return False
+    return True
+
+
 def _is_echo(new_chars: str, said: str) -> bool:
     """ASR 新吐出的这几个字，是不是助手自己的声音绕回麦克风了。
 
@@ -1650,6 +1770,10 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None, is_busy=No
             if said is not None and _is_echo(cur[barge_base:], said()):
                 if BARGE_DEBUG:
                     print(f"[barge] {cur[barge_base:]!r} 是助手自己的回声，不算插话", flush=True)
+                barge_base = len(cur)
+            elif _is_backchannel(cur[barge_base:]):
+                if BARGE_DEBUG:
+                    print(f"[barge] {cur[barge_base:]!r} 是附和，不算插话", flush=True)
                 barge_base = len(cur)
             else:
                 barge_base = len(cur)
@@ -1771,6 +1895,17 @@ async def llm_tts_session(sock):
 
     async for pending in anticipate(sock, on_speech=stop_reply, owner=owner,
                                     is_busy=hearing, said=lambda: turn["reply"]["text"]):
+        # 整轮都是附和、而助手还在说：当没听见。
+        #
+        # _is_backchannel 原来只挡在"说到一半"那条路上（anticipate 里），可 VAD
+        # 判完一整轮走的是**另一条**——下面这句 stop_reply(force=True)。所以只
+        # 应一声"嗯"，VAD 认为你说完了一轮，新回合就以"顶掉旧回合"的名义把正在
+        # 播的回复掐了，附和词表根本没被问到。实测日志里就是这样掐的。
+        # 助手没在说话时的"嗯"照旧当正常一轮走。
+        if _is_backchannel(pending.text) and hearing():
+            if BARGE_DEBUG:
+                print(f"[barge] 整轮都是附和 {pending.text!r}，不算一轮，继续说", flush=True)
+            continue
         # 上一轮还没播完就被新的一轮顶掉。force：这里不能被宽限期挡下来，挡下来
         # 旧任务会继续往同一条 socket 里灌音频，两轮交织着播。
         await stop_reply(force=True)
@@ -1943,6 +2078,12 @@ async def realtime_session(sock):
                 async for pending in anticipate(sock, on_frame=on_frame,
                                                 on_speech=on_speech, owner=owner,
                                                 said=lambda: turn["reply"]):
+                    # 跟 llm_tts 那条一致：整轮都是附和、助手还在说，就当没听见。
+                    if _is_backchannel(pending.text) and hearing():
+                        if BARGE_DEBUG:
+                            print(f"[barge] 整轮都是附和 {pending.text!r}，不算一轮，继续说",
+                                  flush=True)
+                        continue
                     if hearing():                        # 上一轮还没播完就被新的一轮顶掉
                         await on_speech()
                     turn.update(live=True, reply="", pending=pending,
@@ -2216,7 +2357,7 @@ def rb_human(claim: str) -> str:
     """显示用的那句话。还没改写好就先返回原文，同时排上队。"""
     if not RB_HUMANIZE or not claim:
         return claim
-    name, lang = owner_name(), UI_LANG
+    name, lang = owner_name(), SPACE_LANG
     hit = _RB_HUMAN.get((lang, name, claim))
     if hit:
         return hit
@@ -2232,7 +2373,7 @@ def rb_human_batch(claims: list) -> None:
     """一次把缺的都排上队——脑图一屏几十条，一条一个线程太浪费。"""
     if not RB_HUMANIZE:
         return
-    name, lang = owner_name(), UI_LANG
+    name, lang = owner_name(), SPACE_LANG
     todo = [c for c in dict.fromkeys(claims)
             if c and (lang, name, c) not in _RB_HUMAN
             and (lang, name, c) not in _RB_HUMAN_PENDING]

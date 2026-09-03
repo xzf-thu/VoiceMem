@@ -548,31 +548,88 @@ class Orchestrator:
         """
         import json as _json
 
+        from voicemem.lang import is_zh as _is_zh, label_rule as _label_rule
+
+        def _looks_cjk(t: str) -> bool:
+            return any("\u4e00" <= ch <= "\u9fff" for ch in (t or ""))
+        def _keep(items):
+            """语言守卫：标签跟原话不同文种就丢掉。
+
+            prompt 里已经写了"跟随说话人的语言"、示例也按语言换过了，但模型在
+            temperature=0 下仍会时不时输出中文标签（实测两次里约一次）。存进去
+            的后果比丢掉严重得多：这份画像每轮都拼进 system prompt，英文对话里
+            会突然冒出中文；而丢掉只是这一轮少一条特质，下一轮还会再抽。
+            跟 attribution_manager 精炼后语言变了就保留原句是同一个取舍。
+            """
+            want_cjk = _is_zh()
+            out = []
+            for slot, label in items:
+                if _looks_cjk(label) != want_cjk:
+                    print(f"[RBTrait] 语言不符，丢弃：{slot} ← {label}", flush=True)
+                    continue
+                out.append((slot, label))
+            return out
+
         from voicemem.leftbrain import merged_extraction
         if merged_extraction.enabled():
             cached = merged_extraction.take_traits(text)
             if cached is not None:
                 valid = {"喜好与厌恶", "表达风格", "思维模式", "应对方式", "情绪"}
-                return [(s, l) for s, l in cached if s in valid and l]
+                return _keep([(s, l) for s, l in cached if s in valid and l])
 
-        prompt = (
-            f"用户说了这句话（当前情绪：{emotion or '未知'}）：\n「{text[:300]}」\n\n"
-            "判断这句话有没有透露出以下几类主观信息，每类最多提炼一条简短标签（中文，5-15字）：\n"
-            "- 喜好与厌恶：本能的喜欢/讨厌/偏好\n"
-            "- 表达风格：说话/沟通方式和习惯\n"
-            "- 思维模式：思考、判断、决策的习惯\n"
-            "- 应对方式：面对压力/负面情绪时怎么自我调节\n"
-            "- 情绪：什么情况下会有什么情绪。**必须写成一个规律，不是一个情绪词**：\n"
-            "  「评审前会紧张」「被打断就烦」「一个人待着会踏实」，不要写「焦虑」「开心」。\n"
-            "  这句话会成为脑图上一个节点的标题，光一个情绪词看不出是什么事。\n\n"
-            "没有清晰体现的类别就不要输出。\n"
-            "**标签的写法**：它会成为脑图上一个节点的标题，所以写成一句短短的规律，\n"
-            "5-15 字，不要主语、不要句号：「讨厌被打断」「压力大时想被安抚」「先要结论」。\n"
-            "不要写成「用户倾向于详细规划和结构化思考。」这种带主语的整句，也不要\n"
-            "把原话或事实抄一遍。\n"
-            '只输出 JSON：{"items": [{"slot": "喜好与厌恶", "label": "讨厌被打断"}, ...]}'
-            '（items 可以是空列表 []）'
-        )
+        # 中英两套 prompt，按这一轮说的话选。
+        #
+        # 曾经只有中文这一套：英文用户进来，事实是英文、特质却全是中文——而且
+        # 模型是**照抄示例**（存下来的正好是「评审前会紧张」「讨厌被打断」这几个
+        # 示例原文）。只加一句"跟随输入语言"的规则没用，示例的牵引力更强，
+        # 所以整套都要换。slot 名保持中文：它是内部键，检索/配额/脑图都按它做键。
+        if _is_zh():
+            prompt = (
+                f"用户说了这句话（当前情绪：{emotion or '未知'}）：\n「{text[:300]}」\n\n"
+                "判断这句话有没有透露出以下几类主观信息，每类最多提炼一条简短标签"
+                "（5-15 字）：\n"
+                "- 喜好与厌恶：本能的喜欢/讨厌/偏好\n"
+                "- 表达风格：说话/沟通方式和习惯\n"
+                "- 思维模式：思考、判断、决策的习惯\n"
+                "- 应对方式：面对压力/负面情绪时怎么自我调节\n"
+                "- 情绪：什么情况下会有什么情绪。**必须写成一个规律，不是一个情绪词**：\n"
+                "  「评审前会紧张」「被打断就烦」「一个人待着会踏实」，不要写「焦虑」「开心」。\n"
+                "  这句话会成为脑图上一个节点的标题，光一个情绪词看不出是什么事。\n\n"
+                "没有清晰体现的类别就不要输出。\n"
+                "**标签的写法**：写成一句短短的规律，5-15 字，不要主语、不要句号：\n"
+                "「讨厌被打断」「压力大时想被安抚」「先要结论」。\n"
+                "不要写成「用户倾向于详细规划和结构化思考。」这种带主语的整句，也不要\n"
+                "把原话或事实抄一遍。\n"
+                f"{_label_rule()}\n"
+                '只输出 JSON：{"items": [{"slot": "喜好与厌恶", "label": "讨厌被打断"}, ...]}'
+                '（items 可以是空列表 []）'
+            )
+        else:
+            prompt = (
+                f"The user said this (current emotion: {emotion or 'unknown'}):\n"
+                f"\"{text[:300]}\"\n\n"
+                "Does it reveal any of these subjective things about the speaker? "
+                "At most ONE short label per category (3-8 words):\n"
+                "- 喜好与厌恶: gut likes / dislikes / preferences\n"
+                "- 表达风格: habits of speaking and communicating\n"
+                "- 思维模式: how they think, weigh things, decide\n"
+                "- 应对方式: what they do to cope with stress or bad feelings\n"
+                "- 情绪: WHEN they feel WHAT. **A pattern, never a bare feeling "
+                "word**: \"tense before design reviews\", \"annoyed when "
+                "interrupted\", \"calm when alone\" — NOT \"anxious\" / \"happy\". "
+                "It becomes the title of a node on a graph; a bare word says nothing.\n\n"
+                "Skip any category the utterance does not clearly show.\n"
+                "**How to write a label**: a short pattern, no subject, no full stop:\n"
+                "  good: hates being interrupted / wants comfort under stress / "
+                "conclusion first\n"
+                "  bad: The user tends to plan in detail. (a full sentence with a subject)\n"
+                "  bad: I major in computer science (copying the utterance / a plain fact)\n"
+                "The slot names above are internal keys — keep them exactly as written, "
+                "in Chinese. Only the label follows the language rule below.\n"
+                f"{_label_rule()}\n"
+                'Output JSON only: {"items": [{"slot": "喜好与厌恶", '
+                '"label": "hates being interrupted"}, ...]} (items may be [])'
+            )
         raw = self._llm_json(prompt)
         if not raw:
             return []
@@ -587,7 +644,7 @@ class Orchestrator:
             label = str(it.get("label", "")).strip()
             if slot in valid_slots and label:
                 result.append((slot, label))
-        return result
+        return _keep(result)
 
     def _embed_text(self, text: str) -> list[float]:
         """图层实体 / slot 锚点 / 右脑判断表用的 embedding。

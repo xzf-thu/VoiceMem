@@ -222,9 +222,10 @@ def build_app(mode, session, classify, snapshot=None, audio_of=None, spaces=None
 
         @app.post("/api/spaces")                     # 新建一个空的
         async def api_space_new(req: Request) -> dict:
-            name = (await req.json()).get("name", "")
+            body = await req.json()
+            name, lang = body.get("name", ""), body.get("language", "")
             try:
-                return _create_space(name)
+                return _create_space(name, lang)
             except FileExistsError as e:
                 raise HTTPException(409, str(e))
             except ValueError as e:

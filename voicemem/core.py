@@ -57,7 +57,13 @@ class VoiceMem:
 
     def __init__(self, api_key=None, mode="text_mode", memory_root=None,
                  user_id="voice_user", base_url=None, reply=None,
-                 openai_key=None, top_k=5, space=None, models=None, **kw):
+                 openai_key=None, top_k=5, space=None, models=None,
+                 memory_language=None, **kw):
+        # 存进记忆的文本用什么语言："en"（默认）或 "zh"。见 voicemem/lang.py。
+        # slot 名和 8 个规范情绪是内部枚举，不受影响。
+        if memory_language:
+            from voicemem.lang import set_memory_language
+            set_memory_language(memory_language)
         # openai_key 是 api_key 的旧名字，等价，保留兼容。新代码用 api_key。
         # 每个模型都能单独选：{"chat": ..., "reply": ..., "embedding": ...,
         # "tts": ..., "realtime": ...}。省略的角色照旧走 env / 默认值。
