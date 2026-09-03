@@ -29,7 +29,9 @@ import base64
 import json
 import os
 import re
+import subprocess
 import sys
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -58,6 +60,9 @@ def _parse(argv):
                    default=os.environ.get("DEMO_MODE", "realtime"),
                    help="回复控制流：realtime=OpenAI 原生语音（默认，体验最好）；"
                         "llm_tts=LLM 流→TTS 流（不需要 Realtime 权限，可换本地 TTS）")
+    p.add_argument("--transport", choices=["websocket", "rtc"],
+                   default=os.environ.get("VOICEMEM_TRANSPORT", "websocket"),
+                   help="音频传输：websocket=原路径；rtc=VoiceMem Pion RTC")
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=int(os.environ.get("VOICEMEM_PORT", 8787)))
     p.add_argument("--spec_min_chars", type=int, default=6,
@@ -72,10 +77,22 @@ def _parse(argv):
                    help="用哪个 memory space（voicemem_memoryspace/<space>/）")
     p.add_argument("--memory_root", default=os.environ.get("VOICEMEM_MEMORY_ROOT", ""),
                    help="直接指定记忆库目录，给了就盖过 --space")
+    p.add_argument("--log-file", default=os.environ.get("VOICEMEM_LOG_FILE", ""),
+                   help="日志文件路径；不传则自动写到 results/logs/")
+    p.add_argument("--no-file-log", action="store_true",
+                   default=os.environ.get("VOICEMEM_FILE_LOG", "1") == "0",
+                   help="只输出到终端，不保存日志文件")
     return p.parse_args(argv)
 
 
 ARGS = _parse(None if __name__ == "__main__" else [])
+
+# 必须放在重依赖 import 之前：模型加载、依赖库 warning、Uvicorn 日志和后面的
+# print 才能从进程启动第一刻起完整落盘。被别的模块 import 时不擅自创建日志文件。
+LOG_FILE = None
+if __name__ == "__main__" and not ARGS.no_file_log:
+    from logging_utils import setup_file_logging
+    LOG_FILE = setup_file_logging(_ROOT, ARGS.log_file)
 
 import utils                                         # noqa: E402  同目录管道层
 from voicemem import VoiceMem                        # noqa: E402
@@ -94,6 +111,8 @@ BARGE_THRESHOLD = float(os.environ.get("BARGE_THRESHOLD", "0.45"))  # 越小越�
 BARGE_MIN_CHARS = int(os.environ.get("BARGE_MIN_CHARS", "2"))
 #: 助手刚开口那一小段不允许被打断——那时候麦克风里几乎只有它自己的声音。
 BARGE_GRACE_MS = int(os.environ.get("BARGE_GRACE_MS", "500"))
+# RTC 模式下浏览器 AEC 后的连续人声先暂停播放，不再等 ASR 攒出两个字。
+BARGE_VAD_MS = int(os.environ.get("BARGE_VAD_MS", "120"))
 #: OpenAI 那侧用哪种回合/打断判定。semantic_vad 由模型判"这是不是真的在打断"，
 #: 对 backchannel（"嗯""对""哦"）不敏感；server_vad 只看有没有声音，所以助手自己
 #: 的回声、环境噪声都能把它掐了。模型或 SDK 不支持时会以 error 事件回来（不抛），
@@ -111,6 +130,7 @@ STRANGER_MIN_TURNS = int(os.environ.get("STRANGER_MIN_TURNS", "1"))
 #: 每轮都打一行说话人判定（默认只在判成陌生人时打）。
 SPEAKER_DEBUG = os.environ.get("SPEAKER_DEBUG", "0") != "0"
 MODE = ARGS.mode                                     # llm_tts | realtime
+TRANSPORT = ARGS.transport                           # websocket | rtc
 SPEC_MIN_CHARS = ARGS.spec_min_chars                 # partial 起投机
 GAMBLE_S  = ARGS.gamble_ms / 1000                    # 赌说完
 CONFIRM_S = ARGS.confirm_ms / 1000                   # VAD 确认结束
@@ -1609,6 +1629,8 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None, is_busy=No
         owner = {"id": "", "last": "", "miss": 0}   # 主人的声纹 / 上一轮是谁 / 连续认错几轮
     barge_base = 0                        # 上次触发打断时的转写长度
     barged = False                        # 这一轮是否已确认「人在插话」
+    vad_voice_ms = 0.0
+    vad_interrupted = False
     while True:
         msg = await sock.receive()
         if msg.get("type") == "websocket.disconnect":         # 关页面/刷新：收工
@@ -1629,6 +1651,19 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None, is_busy=No
             await on_frame(raw)                               # 方案 A：音频也进 OpenAI 缓冲
         stream.emotion = owner.get("emotion") or None         # 上一轮算出来的情绪
         st = await stream.feed(raw)                           # 核心：ASR + VAD + 投机预取
+        # RTC 的上/下行是独立音轨，浏览器 AEC 也在持续工作。助手正在播放时只要
+        # 连续人声达到很短门槛就先停声音，ASR 随后负责形成真正的新轮次。
+        if getattr(sock, "kind", "") == "rtc" and is_busy and is_busy():
+            if st.state == "<speak>":
+                vad_voice_ms += len(raw) / 2 / MIC_RATE * 1000
+            else:
+                vad_voice_ms = 0.0
+            if vad_voice_ms >= BARGE_VAD_MS and not vad_interrupted and on_speech:
+                vad_interrupted = True
+                if BARGE_DEBUG: print(f"[barge] RTC VAD {vad_voice_ms:.0f}ms → 立即停播", flush=True)
+                await on_speech()
+        elif st.state != "<speak>":
+            vad_voice_ms = 0.0
         # 打断走「ASR 确认制」：不是听到人声就掐，而是等转写真的多出几个字。
         # 助手的回声进了 ASR 也转不出连贯的新字，咳嗽和关门声更不会——这一条
         # 比任何 VAD 阈值都好使，见 BARGE_MIN_CHARS 上面那段。
@@ -1671,6 +1706,7 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None, is_busy=No
             last_partial = ""
             barge_base = 0                                    # 新一轮，转写从头开始涨
             barged = False
+            vad_voice_ms, vad_interrupted = 0.0, False
             # 谁在说话。第一个开口的人算这场对话的主人；之后换了另一个声纹，
             # 就是陌生人——不能把主人的记忆讲给他听（"我是谁？"→"你是Jiaqi"
             # 这个 bug 就是因为检索从不看说话人）。
@@ -2414,17 +2450,39 @@ def memory_snapshot(limit: int = 48) -> dict:
 app = utils.build_app(MODE, realtime_session if MODE == "realtime" else llm_tts_session,
                       lambda *a, **k: vm.classify(*a, **k), memory_snapshot, audio_of,
                       spaces=(list_spaces, create_space, use_space, lambda: ACTIVE_SPACE),
-                      set_lang=set_lang)
+                      set_lang=set_lang, transport=TRANSPORT, sample_rate=MIC_RATE)
 
 
 if __name__ == "__main__":
-    print(f"[web] mode={MODE} spec≥{SPEC_MIN_CHARS}字 gamble={ARGS.gamble_ms}ms "
+    print(f"[web] mode={MODE} transport={TRANSPORT} spec≥{SPEC_MIN_CHARS}字 gamble={ARGS.gamble_ms}ms "
           f"confirm={ARGS.confirm_ms}ms -> http://localhost:{ARGS.port}/", flush=True)
     # 全部预热在这儿做完，别让第一句话去等模型加载。ASR(FunASR paraformer)
     # 是懒加载的，等用户开口才拉起来要好几秒——那几秒的音频堆在 socket 缓冲里，
     # 追赶时逐帧喂 VAD，静音会瞬间累计过 confirm_ms，第一句直接被截断（听感就是
     # "第一句又慢又不准"）。
-    print("[web] 预热本地模型（embedding / ASR / VAD / 感知）…", flush=True)
-    vm.warmup(verbose=True)
-    print("[web] 就绪", flush=True)
-    uvicorn.run(app, host=ARGS.host, port=ARGS.port)
+    gateway_proc = None
+    if TRANSPORT == "rtc":
+        binary = _ROOT / "rtc_gateway" / "voicemem-rtc"
+        if not binary.exists():
+            raise SystemExit("RTC gateway 未构建：cd rtc_gateway && go build -o voicemem-rtc .")
+        gateway_proc = subprocess.Popen([str(binary)], stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT, text=True, bufsize=1)
+        def relay_gateway_log():
+            for line in gateway_proc.stdout:
+                print(f"[rtc-gateway] {line.rstrip()}", flush=True)
+        threading.Thread(target=relay_gateway_log, daemon=True,
+                         name="rtc-gateway-log").start()
+        time.sleep(.3)
+        if gateway_proc.poll() is not None:
+            raise SystemExit("RTC gateway 启动失败（默认端口 8790）")
+        print(f"[rtc] gateway pid={gateway_proc.pid} http://127.0.0.1:8790", flush=True)
+    try:
+        print("[web] 预热本地模型（embedding / ASR / VAD / 感知）…", flush=True)
+        vm.warmup(verbose=True)
+        print("[web] 就绪", flush=True)
+        uvicorn.run(app, host=ARGS.host, port=ARGS.port)
+    finally:
+        if gateway_proc is not None:
+            gateway_proc.terminate()
+            try: gateway_proc.wait(timeout=3)
+            except subprocess.TimeoutExpired: gateway_proc.kill()

@@ -13,6 +13,7 @@ tests/*
 
 # 运行时数据：记忆库、评测结果、录音归档
 results/
+/rtc_gateway/voicemem-rtc
 memory/
 out/
 
@@ -29,17 +30,8 @@ out/
 *.pth
 *.safetensors
 *.bin
-# 按用途分的模型目录（连同 tokens.txt / test_wavs 这些随包资产一起）；
-# models/ 下的内容全部由 scripts/download_models.sh 拉取，不进仓库
-models/vad/
-models/asr/
-models/speaker/
-models/embedding/
-models/scene/
-models/emotion/
-models/tts/
-models/slm/
-models/reply_adapter/
+# models/ 下的内容由下载脚本或运行时缓存生成，不进仓库
+/models/
 
 # 本地演示分叉与个人种子脚本
 demo_local/

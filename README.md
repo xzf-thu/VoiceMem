@@ -226,6 +226,42 @@ python web/run.py
 http://localhost:8787
 ```
 
+Demo 默认同时把终端输出、Python logging、Uvicorn 错误和浏览器 JavaScript 异常
+保存到 `results/logs/voicemem-时间-PID.log`。启动时终端会打印实际路径。指定文件或
+临时关闭文件日志如下。
+
+```bash
+python web/run.py --log-file results/logs/debug.log
+python web/run.py --no-file-log
+```
+
+### RTC
+
+RTC 使用独立的 Go/Pion 本机媒体网关。先构建一次：
+
+```bash
+cd rtc_gateway
+go build -o voicemem-rtc .
+cd ..
+```
+
+然后使用 RTC 音轨运行；业务事件和字幕仍走原 WebSocket：
+
+```bash
+python web/run.py --mode llm_tts --transport rtc
+```
+
+原路径保留为 `--transport websocket`。RTC 模式采用 200ms 有界播放缓冲，并在
+连续人声达到 `BARGE_VAD_MS`（默认 120ms）时先停播，再由 ASR 形成新轮次。
+RTC 网关不配置公网地址映射，只发布设备的本地网络候选。HTTP IPC 仅监听
+`127.0.0.1:8790`，媒体使用本机网卡的 `8791/UDP` 和 `8792/TCP`。
+
+实时查看最新日志：
+
+```bash
+tail -f results/logs/debug.log
+```
+
 ## 🧠 VoiceMem：基于流式双脑架构的记忆系统
 
 **VoiceMem** 是一个面向实时语音智能体的记忆系统。
@@ -622,6 +658,39 @@ Then open:
 ```text
 http://localhost:8787
 ```
+
+By default, the demo mirrors terminal output, Python logging, Uvicorn errors,
+and browser JavaScript exceptions to `results/logs/voicemem-TIME-PID.log`. The
+resolved path is printed at startup. To choose a
+path or disable file logging:
+
+```bash
+python web/run.py --log-file results/logs/debug.log
+python web/run.py --no-file-log
+```
+
+### RTC
+
+The RTC path uses a local Go/Pion media gateway. Build it once with Go 1.24 or
+newer:
+
+```bash
+cd rtc_gateway
+go build -o voicemem-rtc .
+cd ..
+```
+
+Run the demo with WebRTC audio tracks while signaling, subtitles, and memory
+events remain on the application WebSocket:
+
+```bash
+python web/run.py --mode llm_tts --transport rtc
+```
+
+The gateway publishes local network candidates only and has no public address
+mapping. The media queue is bounded to 200 ms, and 120 ms of continuous speech
+triggers an early playback interruption before ASR finalizes the next turn. Use
+`--transport websocket` for the PCM WebSocket path.
 
 ## 🧠 VoiceMem: Memory with a Streaming Dual-Brain Architecture
 

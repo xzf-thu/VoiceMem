@@ -53,6 +53,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+rtc = [
+    "av>=14",
+]
+
 # 跑我们微调的 Qwen 回复模型（Qwen3.6-35B-A3B + QLoRA adapter）。
 # 权重不在 wheel 里，用 `bash scripts/download_models.sh --reply-adapter` 拉。
 slm = [

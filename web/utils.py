@@ -147,8 +147,8 @@ def hits_payload(result, has_audio=None, cluster_of=None):
 
 # ── FastAPI + WS 接线（仅接线，渲染都在 index.html）─────────────────────────────
 def build_app(mode, session, classify, snapshot=None, audio_of=None, spaces=None,
-              set_lang=None):
-    """session(sock)：run.py 传入的会话循环（llm_tts / realtime）。classify(query)：给脑图生长用。
+              set_lang=None, transport="websocket", sample_rate=24000):
+    """session(transport)：run.py 传入的会话循环（llm_tts / realtime）。classify(query)：给脑图生长用。
     snapshot()：库里已有的记忆，前端打开页面时先把脑图铺满。
     spaces=(list_fn, create_fn, use_fn, active_fn)：Memory Space 的增/查/切换。
     set_lang(lang)：界面切语言时同步给助手（回复语言 + 抽取语言）。"""
@@ -157,11 +157,33 @@ def build_app(mode, session, classify, snapshot=None, audio_of=None, spaces=None
     @app.websocket("/ws")
     async def ws(sock: WebSocket):
         await sock.accept()
-        await sock.send_json({"type": "session_ready", "mode": mode})
+        media = None
         try:
-            await session(sock)
+            try:
+                from .transports import create_transport
+            except ImportError:
+                from transports import create_transport
+            media = await create_transport(transport, sock, sample_rate)
+            await sock.send_json({"type": "session_ready", "mode": mode, **media.session_info()})
+            await session(media)
         except WebSocketDisconnect:
             pass          # 关页面/刷新是正常结束，别刷一屏 traceback
+        finally:
+            if media is not None:
+                await media.close()
+
+    @app.post("/api/rtc/offer/{session_id}")
+    async def rtc_offer(session_id: str, req: Request):
+        if transport != "rtc":
+            raise HTTPException(404, "RTC is disabled")
+        import httpx
+        gateway = os.environ.get("VOICEMEM_RTC_GATEWAY", "http://127.0.0.1:8790").rstrip("/")
+        async with httpx.AsyncClient(timeout=20) as cli:
+            response = await cli.post(f"{gateway}/offer/{session_id}", content=await req.body(),
+                                      headers={"Content-Type": "application/json"})
+        if response.is_error:
+            raise HTTPException(response.status_code, response.text)
+        return response.json()
 
     class Q(BaseModel):
         query: str
@@ -209,6 +231,19 @@ def build_app(mode, session, classify, snapshot=None, audio_of=None, spaces=None
         lang = (await req.json()).get("lang", "zh")
         set_lang(lang) if set_lang else None
         return {"lang": lang}
+
+    @app.post("/api/debug/log")                      # 浏览器异常也写进后端同一份日志
+    async def api_debug_log(req: Request) -> dict:
+        try:
+            body = await req.json()
+        except Exception:
+            body = {}
+        kind = str(body.get("kind") or "browser")[:40]
+        message = str(body.get("message") or "")[:12000]
+        page = str(body.get("page") or "")[:500]
+        peer = req.client.host if req.client else "-"
+        print(f"[browser:{kind}] peer={peer} page={page or '-'}\n{message}", flush=True)
+        return {"ok": True}
 
     if spaces:
         _list_spaces, _create_space, _use_space, _active_space = spaces

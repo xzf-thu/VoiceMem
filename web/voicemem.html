@@ -432,6 +432,14 @@ button{cursor:pointer;background:none;border:none}
    一次是变量遮蔽），每次都得让人去开 F12 才看得见。
    干脆把错误直接贴在页面顶上。 */
 (function(){
+  function report(kind,msg){
+    try{
+      fetch('/api/debug/log',{method:'POST',keepalive:true,
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({kind:kind,message:String(msg||''),page:location.href})
+      }).catch(function(){});
+    }catch(ignore){}
+  }
   function show(msg){
     var d=document.getElementById('__err');
     if(!d){
@@ -444,11 +452,13 @@ button{cursor:pointer;background:none;border:none}
     d.textContent += msg + '\n';
   }
   window.addEventListener('error', function(e){
-    show('[JS 出错] ' + (e.message||'') + '\n  ' + (e.filename||'') + ':' + (e.lineno||'') +
-         (e.error && e.error.stack ? '\n' + e.error.stack.split('\n').slice(0,4).join('\n') : ''));
+    var msg='[JS 出错] ' + (e.message||'') + '\n  ' + (e.filename||'') + ':' + (e.lineno||'') +
+            (e.error && e.error.stack ? '\n' + e.error.stack.split('\n').slice(0,8).join('\n') : '');
+    show(msg); report('error',msg);
   });
   window.addEventListener('unhandledrejection', function(e){
-    show('[Promise 没接住] ' + (e.reason && (e.reason.stack||e.reason.message) || e.reason));
+    var msg='[Promise 没接住] ' + (e.reason && (e.reason.stack||e.reason.message) || e.reason);
+    show(msg); report('unhandledrejection',msg);
   });
 })();
 /* ══════════════════════════════════════════════════════════════════════
@@ -1579,6 +1589,68 @@ const WS_HOST=params.get('ws')||location.host||'localhost:8787';
 const WS_URL=(location.protocol==='https:'?'wss://':'ws://')+WS_HOST+'/ws';
 const SAMPLE_RATE=24000;          // 必须和 run.py 的 MIC_RATE 一致
 let ws=null, live=false, paused=false;
+let mediaTransport='websocket',rtcPeer=null,rtcMicStream=null,rtcMicTrack=null,rtcAudioEl=null;
+let rtcSourceNode=null,rtcGainNode=null,rtcMeterCtx=null,rtcMeterTimer=null;
+
+function waitIce(pc){
+  if(pc.iceGatheringState==='complete') return Promise.resolve();
+  return new Promise(resolve=>{ const f=()=>{ if(pc.iceGatheringState==='complete'){
+    pc.removeEventListener('icegatheringstatechange',f); resolve(); }};
+    pc.addEventListener('icegatheringstatechange',f); });
+}
+async function connectRtc(info){
+  const pc=new RTCPeerConnection(); rtcPeer=pc;
+  const reportState=()=>fetch('/api/debug/log',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({kind:'rtc',message:'connection='+pc.connectionState+' ice='+pc.iceConnectionState,page:location.href})}).catch(()=>{});
+  pc.onconnectionstatechange=reportState; pc.oniceconnectionstatechange=reportState;
+  rtcAudioEl=document.createElement('audio'); rtcAudioEl.autoplay=false; rtcAudioEl.muted=true; rtcAudioEl.style.display='none';
+  document.body.appendChild(rtcAudioEl);
+  pc.ontrack=e=>{ if(e.track.kind==='audio'){
+    const stream=e.streams[0]||new MediaStream([e.track]); rtcAudioEl.srcObject=stream;
+    // HTMLMediaElement autoplay 在异步 SDP 完成后常被浏览器拦截。Start 按钮已经
+    // 解锁了 playCtx，直接把远端音轨接进这个 AudioContext，播放不再依赖 autoplay。
+    const ctx=ensurePlayback();
+    if(rtcSourceNode) rtcSourceNode.disconnect();
+    rtcSourceNode=ctx.createMediaStreamSource(stream); rtcGainNode=ctx.createGain();
+    rtcSourceNode.connect(rtcGainNode); rtcGainNode.connect(ctx.destination);
+    rtcGainNode.gain.value=paused?0:1;
+  }};
+  rtcMicStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+  rtcMicTrack=rtcMicStream.getAudioTracks()[0]; pc.addTrack(rtcMicTrack,rtcMicStream);
+  // RTC 不再经过 ScriptProcessor，单独做一个只读电平表给左侧波形；不改音频内容。
+  rtcMeterCtx=new (window.AudioContext||window.webkitAudioContext)(); await rtcMeterCtx.resume();
+  const meterSrc=rtcMeterCtx.createMediaStreamSource(rtcMicStream),an=rtcMeterCtx.createAnalyser(),meter=new Uint8Array(256);
+  an.fftSize=512; meterSrc.connect(an); rtcMeterTimer=setInterval(()=>{
+    if(!live||paused){lvOn=false;return;} an.getByteTimeDomainData(meter);
+    let peak=0; for(const v of meter) peak=Math.max(peak,Math.abs(v-128)/128); lvOn=peak>.02;
+  },50);
+  await pc.setLocalDescription(await pc.createOffer()); await waitIce(pc);
+  const r=await fetch('/api/rtc/offer/'+encodeURIComponent(info.session_id),{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify(pc.localDescription)});
+  if(!r.ok) throw new Error('RTC offer failed: '+await r.text());
+  await pc.setRemoteDescription(await r.json());
+  if(pc.connectionState!=='connected') await new Promise((resolve,reject)=>{
+    const timer=setTimeout(()=>reject(new Error('RTC ICE 连接超时：请检查本地网络媒体端口')),10000);
+    const check=()=>{ if(pc.connectionState==='connected'){clearTimeout(timer);pc.removeEventListener('connectionstatechange',check);resolve();}
+      else if(pc.connectionState==='failed'){clearTimeout(timer);reject(new Error('RTC ICE 连接失败'));} };
+    pc.addEventListener('connectionstatechange',check);
+  });
+}
+async function connectMedia(m){
+  mediaTransport=m.transport||'websocket';
+  if(mediaTransport==='rtc') await connectRtc(m.rtc||{});
+  if(live) await startMic();
+}
+function updateRtcMic(){ if(rtcMicTrack) rtcMicTrack.enabled=live&&!paused&&!replaying&&!(HALF_DUPLEX&&aiSpeaking); }
+function closeRtc(){
+  if(rtcMeterTimer){clearInterval(rtcMeterTimer);rtcMeterTimer=null;}
+  if(rtcMeterCtx){rtcMeterCtx.close();rtcMeterCtx=null;}
+  if(rtcSourceNode){rtcSourceNode.disconnect();rtcSourceNode=null;}
+  if(rtcGainNode){rtcGainNode.disconnect();rtcGainNode=null;}
+  if(rtcPeer){rtcPeer.close();rtcPeer=null;}
+  if(rtcMicStream){rtcMicStream.getTracks().forEach(t=>t.stop());rtcMicStream=null;}
+  rtcMicTrack=null; if(rtcAudioEl){rtcAudioEl.remove();rtcAudioEl=null;}
+}
 
 /* --- 播放 ---------------------------------------------------------- */
 /* Continuous PCM playback with adaptive jitter buffering. */
@@ -1717,6 +1789,7 @@ function resampleLinear(f32,from,to){
   return out;
 }
 async function startMic(){
+  if(mediaTransport==='rtc'){ updateRtcMic(); return; }
   micStream=await navigator.mediaDevices.getUserMedia(
     {audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
   if(!micCtx) micCtx=new (window.AudioContext||window.webkitAudioContext)();
@@ -1735,6 +1808,7 @@ async function startMic(){
   src.connect(micProc); micProc.connect(micCtx.destination);
 }
 function stopMic(){
+  if(rtcMicTrack) rtcMicTrack.enabled=false;
   if(micProc){ micProc.disconnect(); micProc.onaudioprocess=null; micProc=null; }
   if(micStream){ for(const t of micStream.getTracks()) t.stop(); micStream=null; }
   lvOn=false;
@@ -1991,7 +2065,8 @@ function handle(m){
       // Chained TTS uses a larger initial jitter buffer.
       pcmPrebuffer=m.mode==='realtime'?0.08:0.16;
       configurePcmPlayer();
-      toast(i18n('connected', m.mode||'')); break;
+      toast(i18n('connected', (m.mode||'')+' / '+(m.transport||'websocket')));
+      connectMedia(m).catch(e=>endLive(i18n('disconnected',e.message||e.name))); break;
 
     case 'partial_transcript':
       setVoice('user'); s.ui.input=m.text; paint(s); break;
@@ -2041,6 +2116,9 @@ function handle(m){
       liveReply+=m.text;
       setSpokenCaptionTarget(liveReply); break;
 
+    case 'audio_playback_start':
+      setSpokenCaptionPlaying(true); aiSpeaking=true; updateRtcMic(); break;
+
     case 'answer_done':
       finishPcmStream();
       const playbackGeneration=replyPlaybackGeneration;
@@ -2051,7 +2129,7 @@ function handle(m){
         if(playbackGeneration!==replyPlaybackGeneration) return;
         completeSpokenCaption(completedReply);
         finishLiveChatDraft(s,completedReply);
-        aiSpeaking=false; setVoice('idle');
+        aiSpeaking=false; setVoice('idle'); updateRtcMic();
         if(memoryClip) playMemoryClip(memoryClip);
       });
       titleFor(s);
@@ -2069,7 +2147,7 @@ function handle(m){
       paintSpokenCaption(heardReply);
       finishLiveChatDraft(s,heardReply);
       liveReply='';
-      stopPlayback(); aiSpeaking=false; setVoice('user'); break;
+      stopPlayback(); aiSpeaking=false; setVoice('user'); updateRtcMic(); break;
 
     case 'tag_update': {
       // 声学情绪是后台算的（2.3 秒），算准了才补这一条。热路径上先发的是文本
@@ -2185,6 +2263,7 @@ function syncButtons(){
 function endLive(note){
   live=false; paused=false;
   stopMic(); stopPlayback();
+  closeRtc(); mediaTransport='websocket';
   if(ws){ ws.onclose=null; ws.close(); ws=null; }
   aiSpeaking=false; syncButtons(); setVoice('idle');
   if(note) toast(note);
@@ -2205,8 +2284,7 @@ talkBtn.addEventListener('click',async()=>{
     createSession(activeSpace);
     await loadMemories();
     syncButtons(); setVoice('user');
-    try{ await startMic(); }
-    catch(e){ endLive(i18n('disconnected', i18n('micFailed', e.name))); }
+    // session_ready 决定媒体路径并启动对应麦克风。
   };
   ws.onmessage=ev=>{
     if(ev.data instanceof ArrayBuffer){
@@ -2228,6 +2306,8 @@ pauseBtn.addEventListener('click',()=>{
   if(!live) return;
   paused=!paused;
   if(paused){ lvOn=false; stopPlayback(); }
+  if(rtcGainNode) rtcGainNode.gain.value=paused?0:1;
+  updateRtcMic();
   setVoice(paused?'paused':'user'); syncButtons();
 });
 syncButtons();
