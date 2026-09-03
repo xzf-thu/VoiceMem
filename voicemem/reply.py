@@ -29,6 +29,7 @@ import asyncio
 import inspect
 import os
 from typing import AsyncIterator, Callable
+from voicemem.llm_config import resolve_api_key, resolve_base_url, resolve_model
 
 # memory_context 只是「记得关于用户的哪些事」，本身不含人设/风格要求，所以内置
 # provider 把它接在这句后面，而不是拿它整个当 system prompt。
@@ -47,8 +48,10 @@ def openai_reply(model: str | None = None, api_key: str | None = None,
                  base_url: str | None = None, system: str | None = None) -> Callable:
     """内置回复 provider：OpenAI 兼容 api，流式吐字。返回一个异步生成器函数。
 
-    模型默认取 ``OPENAI_CHAT_MODEL``，再回落 ``gpt-4o-mini``。client 首次调用时才建，
-    ``import voicemem`` 不会因此要求有 key。
+    模型走 ``reply`` 角色：``model`` 参数 → ``VOICEMEM_REPLY_MODEL`` → 跟随 ``chat``。
+    回复是用户直接听得见的一路，所以单独留了一个角色让它能和后台整理记忆的模型
+    分开配；不配就跟着 chat 走，不会出现"设了模型但回复还在用默认值"这种一半生效。
+    ``import voicemem`` 不会因此要求有 key（client 首次调用时才建）。
     """
     client = None
 
@@ -57,11 +60,11 @@ def openai_reply(model: str | None = None, api_key: str | None = None,
         if client is None:
             from openai import AsyncOpenAI
             client = AsyncOpenAI(
-                api_key=api_key or os.environ.get("OPENAI_API_KEY"),
-                base_url=base_url or os.environ.get("OPENAI_BASE_URL") or None,
+                api_key=resolve_api_key(api_key),
+                base_url=resolve_base_url(base_url),
             )
         stream = await client.chat.completions.create(
-            model=model or os.environ.get("OPENAI_CHAT_MODEL") or "gpt-4o-mini",
+            model=resolve_model(model, "reply"),
             stream=True,
             messages=[{"role": "system", "content": compose_system(memory_context, system)},
                       {"role": "user", "content": text}],

@@ -168,7 +168,7 @@ class Transcriber:
     def __init__(self, device: str) -> None:
         from funasr import AutoModel        # 懒 import：只有用非流式精转写才需要 funasr
         from voicemem.utils.common.paths import hf_model
-        _name = hf_model("emotion", "FunAudioLLM/SenseVoiceSmall", "VOICEMEM_SENSEVOICE_MODEL")
+        _name = hf_model("emotion", "FunAudioLLM/SenseVoiceSmall", "asr")
         self.model = AutoModel(model=_name, hub="hf",
                                device=device, disable_update=True,
                                trust_remote_code=False)

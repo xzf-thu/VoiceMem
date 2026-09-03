@@ -1,6 +1,6 @@
 """voicemem 各能力的内置默认实现工厂（util 名 -> 无参工厂）。
 
-core.py 的 Utils 用它建默认；传函数给 VoiceMem(embedding=..., schema=...) 即覆盖对应项。
+core.py 的 Utils 用它建默认；传函数给 VoiceMem(embedding=..., slots=...) 即覆盖对应项。
 九个位子：embedding / schema / entity / emotion / voiceprint / asr / vad /
 memory_engine / tts。前八个在核心链路上（按 mode 由 _NEED 决定加载哪些），
 tts 不在——记忆系统只到文本为止，出声是可选的一层。
@@ -15,7 +15,7 @@ def default_utils(base_url, memory_root):
     def embedding():
         from voicemem.leftbrain.local_memory_store import OpenAILocalEmbedder, OpenAILocalEmbedderConfig
         return OpenAILocalEmbedder(OpenAILocalEmbedderConfig(base_url=base_url))
-    def schema():
+    def slots():
         # 默认本地 E5 分类器：0 LLM、0 网络——投机预取那 0–300ms 预算里不能走网络，
         # 而 Classify 就在那条路上（voicemem/stream.py 的 _speculate）。
         # sentence-transformers 不在基础依赖里（随 [demo] extra 装），缺了就回落到
@@ -70,6 +70,6 @@ def default_utils(base_url, memory_root):
         # 直接构造 default_utils 时用得上，跟上面保持同一个默认。
         return Mem0BackendStore(embedding(),
                                 memory_root=Path(memory_root or Path.cwd() / "voicemem_memory"))
-    return {"embedding": embedding, "schema": schema, "entity": entity, "emotion": emotion,
+    return {"embedding": embedding, "slots": slots, "entity": entity, "emotion": emotion,
             "voiceprint": voiceprint, "asr": asr, "vad": vad, "memory_engine": memory_engine,
             "tts": tts}

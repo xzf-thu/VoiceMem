@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+from voicemem.llm_config import resolve_model
 
 
 @dataclass
@@ -21,8 +22,4 @@ class FusionConfig:
     emotion_graph_search_limit: int = 5
 
     def resolved_right_filter_model(self) -> str:
-        return (
-            self.right_filter_model
-            or os.environ.get("OPENAI_MODEL", "").strip()
-            or "gpt-4o-mini"
-        ).strip()
+        return resolve_model(self.right_filter_model)

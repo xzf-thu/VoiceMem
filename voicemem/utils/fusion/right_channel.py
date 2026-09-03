@@ -11,6 +11,7 @@ from voicemem.utils.audio.emotion.memory_store import EmotionMemoryStore
 from voicemem.utils.audio.emotion.types import EmotionAttribution, VAD
 from voicemem.utils.fusion.config import FusionConfig
 from voicemem.utils.fusion.types import RightMemoryHit
+from voicemem.llm_config import resolve_api_key, resolve_model
 
 
 @runtime_checkable
@@ -73,7 +74,7 @@ class OpenAIRightChannelRelevanceFilter:
         self._temperature = temperature
 
     def _resolved_model(self) -> str:
-        return (self._model or os.environ.get("OPENAI_MODEL", "").strip() or "gpt-4o-mini").strip()
+        return resolve_model(self._model)
 
     def filter_relevant(
         self,
@@ -89,7 +90,7 @@ class OpenAIRightChannelRelevanceFilter:
         except ImportError as e:
             raise ImportError("请安装: pip install openai>=1.0") from e
 
-        api_key = os.environ.get("OPENAI_API_KEY")
+        api_key = resolve_api_key()
         if not api_key:
             raise ValueError("缺少 OPENAI_API_KEY")
 

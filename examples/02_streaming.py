@@ -54,7 +54,7 @@ async def main():
             "emotion",
             "transcript",
             "entity",
-            "schema",
+            "slots",
             "text_embedding",
         ]
 

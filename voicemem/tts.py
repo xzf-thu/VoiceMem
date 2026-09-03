@@ -28,8 +28,11 @@ import os
 import numpy as np
 
 from voicemem.utils.audio.stream_io import resample
+from voicemem.llm_config import resolve_model
 
-TTS_MODEL = os.environ.get("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
+#: 兼容旧名字。真正的解析在 OpenAITTS.__init__ 里现算（见 llm_config）——
+#: 原来这里是 import 时读 env，先 import 后设 env 就静默不生效。
+TTS_MODEL = resolve_model(role="tts")
 TTS_BACKEND = os.environ.get("TTS_BACKEND", "openai")   # openai(api) | local | voxcpm
 #: 音色。原来这个值写死在合成函数里，走 llm_tts 的用户想换只能改源码——
 #: 内置默认实现也该是可配的，不然「可替换」只剩换掉整个后端一条路。
@@ -112,7 +115,7 @@ class OpenAITTS(BaseTTS):
 
     def __init__(self, model=None, voice=None, instructions=None,
                  api_key=None, base_url=None):
-        self.model = model or TTS_MODEL
+        self.model = resolve_model(model, "tts")
         self.voice = voice or TTS_VOICE
         self.instructions = TTS_INSTRUCTIONS if instructions is None else instructions
         self._key = api_key
@@ -150,7 +153,7 @@ class PiperTTS(BaseTTS):
     """
 
     def __init__(self, model=None):
-        self.model = model or os.environ.get("VOICEMEM_TTS_MODEL")
+        self.model = resolve_model(model, "tts", default=None)
         self._voice = None
 
     def _load(self):
@@ -177,7 +180,7 @@ class VoxCPMTTS(BaseTTS):
     ``model`` 可指向本地目录，缺省用 HF 上的 openbmb/VoxCPM2（走本地缓存）。"""
 
     def __init__(self, model=None):
-        self.model = model or os.environ.get("VOICEMEM_TTS_MODEL") or "openbmb/VoxCPM2"
+        self.model = resolve_model(model, "tts", default=None) or "openbmb/VoxCPM2"
         self._m = None
 
     def _load(self):

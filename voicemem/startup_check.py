@@ -290,7 +290,7 @@ def check_and_gate(vm: Any = None, *, interactive: bool | None = None) -> bool:
 
 # ── util 自检（VoiceMem.test()）：4 档 = 不可用 / 较慢 / 正常 / 极快 ─────────────
 _UTIL_BUDGET = {   # ms，每个 util 的"正常"上限
-    "embedding": 200, "schema": 400, "entity": 400, "emotion": 500,
+    "embedding": 200, "slots": 400, "entity": 400, "emotion": 500,
     "voiceprint": 3000, "asr": 5000, "memory_engine": 300,
 }
 _TIER = {"极快": "⚡极快", "正常": "✓正常", "较慢": "⚠较慢", "不可用": "✗不可用"}
@@ -299,7 +299,7 @@ _TIER = {"极快": "⚡极快", "正常": "✓正常", "较慢": "⚠较慢", "�
 def _exercise(name, obj, wav):
     """跑一次代表性操作（没有廉价代表操作的 util 只算构建耗时）。"""
     if name == "embedding":       obj.embed_texts(["测试"])
-    elif name == "schema":        obj.classify("我今天有点累")
+    elif name == "slots":         obj.classify("我今天有点累")
     elif name == "emotion":       obj.detect(wav)
     elif name == "voiceprint":    obj.embed(wav)
     elif name == "memory_engine": obj.search("测试", user_id="u")

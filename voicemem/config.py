@@ -2,7 +2,7 @@
 
 每个组件写成 ``{"provider": ..., "config": {...}}``，打开一个 dict 就知道每个模型
 走本地还是 api。``build_kwargs(config)`` 把这份声明式 dict 解析成现有
-``VoiceMem(**kwargs)`` 能吃的注入参数——它是在现有 ``VoiceMem(embedding=fn, schema=fn,
+``VoiceMem(**kwargs)`` 能吃的注入参数——它是在现有 ``VoiceMem(embedding=fn, slots=fn,
 …)`` 注入机制**之上**的一层糖，不改任何现有行为。
 
 一份完整 config 长这样（每段的 config 都可省，省了就用内置默认）::
@@ -46,7 +46,8 @@ provider → 内置实现 的映射（傻瓜清晰，一眼看懂）：
                            voxcpm -> VoxCPMTTS（离线 VoxCPM2）
                            breeze -> BreezeTTS（Breeze TTS 2 流式服务，可用自然语言
                                      指挥语气；权重非商用许可，故不做默认）
-    llm.provider           openai -> 落 OPENAI_MODEL / OPENAI_API_KEY / OPENAI_BASE_URL
+    models                 五个角色的模型名，见 voicemem/llm_config.py
+    llm.provider           openai -> 落 models.chat / OPENAI_API_KEY / OPENAI_BASE_URL
     reply.provider         openai -> voicemem.reply.openai_reply（内置，流式）
                            custom -> config.fn 里那个可调用对象（等价于 VoiceMem(reply=fn)）
 
@@ -55,6 +56,7 @@ provider → 内置实现 的映射（傻瓜清晰，一眼看懂）：
 from __future__ import annotations
 
 import os
+from voicemem.llm_config import MODELS
 
 
 def _split(component: dict | None) -> tuple[str, dict]:
@@ -174,6 +176,30 @@ def _tts_factory(provider, cfg):
 # provider/config。llm 解析成 reply、tts 解析成 tts 可替换位，realtime 归 web 自己读。
 _REPLY_DEMO_KEYS = ("llm", "tts", "realtime")
 
+#: build_kwargs 认识的顶层键。写错一个键名以前是**静默忽略**——配置看着写了、
+#: 实际一点没生效，比报错难查得多（MODELS.update 对角色名也是同样的态度）。
+_KNOWN_TOP = {
+    "api_key", "base_url", "mode", "memory_root", "user_id", "space", "models",
+    "embedding", "slots", "vad", "memory_engine", "llm", "tts", "reply",
+    "top_k",
+}
+
+
+def _check_keys(config: dict) -> None:
+    unknown = sorted(set(config) - _KNOWN_TOP)
+    if unknown:
+        raise ValueError(f"config 里有不认识的键：{', '.join(unknown)}。"
+                         f"可用的是：{', '.join(sorted(_KNOWN_TOP))}")
+    # reply 段有两种形状：扁平 {"provider","config"}，或 demo 那份
+    # {"llm","tts","realtime"} 嵌套。嵌套里核心只消费 llm，tts 落到顶层同名能力，
+    # realtime 归 web demo 自己读——归属写在这儿，不是"解析了却不管"。
+    seg = config.get("reply")
+    if isinstance(seg, dict) and any(k in seg for k in _REPLY_DEMO_KEYS):
+        bad = sorted(set(seg) - set(_REPLY_DEMO_KEYS))
+        if bad:
+            raise ValueError(f"reply 段（嵌套写法）里有不认识的键：{', '.join(bad)}。"
+                             f"可用的是：{', '.join(_REPLY_DEMO_KEYS)}")
+
 
 def _reply_factory(provider, cfg):
     """reply：openai -> 内置流式 provider；custom -> 直接用 config.fn 那个函数。"""
@@ -204,6 +230,7 @@ def build_kwargs(config: dict) -> dict:
     """
     config = config or {}
     kwargs: dict = {}
+    _check_keys(config)
 
     # ── 顶层：api_key / base_url / mode 直接透传 ──
     if config.get("api_key") is not None:
@@ -218,6 +245,14 @@ def build_kwargs(config: dict) -> dict:
         kwargs["user_id"] = config["user_id"]
     if config.get("space") is not None:
         kwargs["space"] = config["space"]
+    if config.get("top_k") is not None:
+        kwargs["top_k"] = config["top_k"]
+
+    # ── models：五个角色的模型名，每个都能单独选（chat / reply / embedding /
+    #    tts / realtime，见 voicemem/llm_config.py）。比下面各组件段里的 model
+    #    靠外——组件段写的更就近，仍然优先。──
+    if config.get("models"):
+        MODELS.update(config["models"])
 
     # ── embedding：VoiceMem 的注入键名是 embedding ──
     if "embedding" in config:
@@ -227,7 +262,7 @@ def build_kwargs(config: dict) -> dict:
     # ── slots：映射到 VoiceMem 的注入键名 schema（Classify 用的分类器）──
     if "slots" in config:
         provider, cfg = _split(config["slots"])
-        kwargs["schema"] = _slots_factory(provider, cfg)
+        kwargs["slots"] = _slots_factory(provider, cfg)
 
     # ── vad：判「说完了」的 VAD（VoiceStream 用）──
     if "vad" in config:
@@ -241,7 +276,9 @@ def build_kwargs(config: dict) -> dict:
         if factory is not None:
             kwargs["memory_engine"] = factory
 
-    # ── llm：左右脑内部 LLM。现有代码读 OPENAI_MODEL / OPENAI_API_KEY /
+    # ── llm：左右脑内部 LLM。``llm.model`` 是 ``models.chat`` 的简写（同一件事，
+    #    两个都写时后解析的 llm 段生效）；这一段还额外管 api_key / base_url。
+    #    现有代码读 OPENAI_MODEL / OPENAI_API_KEY /
     #    OPENAI_BASE_URL 这些 env，这里把 config 落到这些 env（api_key/base_url
     #    也透传给 VoiceMem 参数，保持和顶层一致）。──
     if "llm" in config:
@@ -249,7 +286,10 @@ def build_kwargs(config: dict) -> dict:
         if provider not in (None, "openai"):
             _bad("llm", provider, ["openai"])
         if cfg.get("model"):
-            os.environ["OPENAI_MODEL"] = cfg["model"]
+            # 只落在 MODELS 上，不再顺手写 env：查过了，OPENAI_MODEL 没有任何
+            # 第三方库读（openai SDK / mem0 都不读），写它纯粹是让全局状态多一份
+            # 拷贝。api_key / base_url 不同——那两个 SDK 和 mem0 自己读，必须写。
+            MODELS.update(chat=cfg["model"])
         if cfg.get("api_key"):
             os.environ["OPENAI_API_KEY"] = cfg["api_key"]
             kwargs.setdefault("api_key", cfg["api_key"])

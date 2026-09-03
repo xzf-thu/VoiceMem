@@ -62,7 +62,7 @@ def make_vad(model: str | None = None, threshold: float = 0.5):
     """
     import sherpa_onnx
     path = require(
-        Path(model) if model else model_path("silero_vad.onnx", "VOICEMEM_SILERO_VAD", kind="vad"),
+        Path(model) if model else model_path("silero_vad.onnx", "vad", kind="vad"),
         "silero VAD 模型 silero_vad.onnx",
     )
     v = sherpa_onnx.VoiceActivityDetector(sherpa_onnx.VadModelConfig(

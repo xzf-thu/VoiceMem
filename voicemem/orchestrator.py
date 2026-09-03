@@ -33,6 +33,8 @@ from __future__ import annotations
 
 from voicemem.utils.common import space as _space
 
+import functools
+import inspect
 import os
 import time
 import re
@@ -64,6 +66,7 @@ from voicemem.rightbrain.brain import (
     _render_rb_directive,
 )
 from voicemem.utils.defaults import default_utils
+from voicemem.llm_config import resolve_api_key, resolve_base_url, resolve_model
 
 # 新增多少条记忆（左脑事实 + 右脑 heartnote）才巩固一次。见 Ingest() 里那段注释：
 # 巩固是把历史记忆重新概括，每轮跑既慢（7s）又没什么可总结的。session 结束时无论
@@ -74,9 +77,9 @@ SHORT_TERM_MIN_MEMORIES = int(os.environ.get("VOICEMEM_ATTRIBUTION_MIN_MEMORIES"
 # tts 不在任何一档里：核心链路只到文本为止，出声是可选的一层，谁要出声谁
 # utils.get("tts")——搁进来会让没装 piper/voxcpm 的用户在 warmup 就炸。
 _NEED = {
-    "left_brain_single": ["embedding", "schema", "entity", "memory_engine"],
-    "text_mode":         ["embedding", "schema", "entity", "emotion", "memory_engine"],
-    "multi_modal":       ["embedding", "schema", "entity", "emotion", "voiceprint", "asr", "memory_engine"],
+    "left_brain_single": ["embedding", "slots", "entity", "memory_engine"],
+    "text_mode":         ["embedding", "slots", "entity", "emotion", "memory_engine"],
+    "multi_modal":       ["embedding", "slots", "entity", "emotion", "voiceprint", "asr", "memory_engine"],
 }
 
 
@@ -85,15 +88,43 @@ _NEED = {
 EXPECT_MUSIC_S = float(os.environ.get("VOICEMEM_EXPECT_MUSIC_S", "120"))
 
 
+#: 同一个能力的历史别名 → 正式能力名。
+#:
+#: ``schema`` 其实是"查询槽位分类器"，from_config 里一直叫 ``slots``，两个名字指
+#: 同一个东西；``embedder`` / ``vector_store`` / ``classifier`` 是构造参数那一路的
+#: 叫法。以前这两路各走各的、在 __init__ 里用 pick() 合并，等于同一件事有两个入口
+#: 两套代码。现在在门口就归一到能力名，后面只剩一条路。旧名字继续能用。
+_ALIASES = {"schema": "slots", "embedder": "embedding",
+            "vector_store": "memory_engine", "classifier": "slots"}
+
+
+def _canon(overrides: dict) -> dict:
+    """把别名归一成正式能力名。同时给了新旧两个名字时，正式名优先。"""
+    out = {}
+    for k, v in overrides.items():
+        out.setdefault(_ALIASES.get(k, k), v)
+    for k, v in overrides.items():
+        if k not in _ALIASES:
+            out[k] = v
+    return out
+
+
 class Utils:
     """能力表：内置默认(见 utils/defaults.py) + 用户覆盖，按需懒加载并缓存。"""
     def __init__(self, mode, base_url, memory_root, overrides):
-        self._factory = {**default_utils(base_url, memory_root), **overrides}
+        self._factory = {**default_utils(base_url, memory_root), **_canon(overrides)}
         self.need = _NEED[mode]
         self._cache = {}
     def get(self, name):
+        """能力值可以是**工厂**（函数 / lambda / 类，懒加载，内置默认都是这种），
+        也可以直接是**造好的对象**——两种都收，用户不必为了塞一个现成对象去包一层
+        lambda。判据是"是不是函数/类"，不是 callable()：组件对象自己可能带
+        ``__call__``，用 callable() 会把它当工厂调一次。"""
         if name not in self._cache:
-            self._cache[name] = self._factory[name]()
+            f = self._factory[name]
+            self._cache[name] = f() if (inspect.isfunction(f) or inspect.ismethod(f)
+                                        or inspect.isclass(f)
+                                        or isinstance(f, functools.partial)) else f
         return self._cache[name]
 
 
@@ -164,13 +195,12 @@ class Orchestrator:
         5 个能力开关。默认 ``None`` → 由 ``mode`` 推导（``multi_modal`` 全开、其余音频
         项关；情绪项在非 ``left_brain_single`` 下开）。显式传 True/False 覆盖 mode 推导。
     embedder / vector_store / classifier:
-        直接注入的组件依赖（左脑 embedding / memory engine / query 分类器）。默认 ``None``
-        → 组件用内置默认。与 ``util_overrides`` 里的 ``embedding`` / ``memory_engine`` /
-        ``schema`` 覆盖等价（后者会构造出对象注入到这三个参数）。
+        ``embedding`` / ``memory_engine`` / ``slots`` 三个能力的**旧参数名**，等价，
+        保留兼容。新代码统一用能力名。
     util_overrides:
-        按能力名覆盖内置默认（``embedding`` / ``schema`` / ``memory_engine`` /
-        ``tts`` 等，全表见 ``voicemem/utils/defaults.py``）；被覆盖的能力会注入
-        对应组件构造参数。
+        按能力名覆盖内置默认：``embedding`` / ``slots`` / ``entity`` / ``emotion`` /
+        ``voiceprint`` / ``asr`` / ``vad`` / ``tts`` / ``memory_engine``（全表见
+        ``voicemem/utils/defaults.py``）。值可以是工厂，也可以直接是造好的对象。
     """
 
     def __init__(
@@ -196,11 +226,17 @@ class Orchestrator:
         if api_key:
             os.environ["OPENAI_API_KEY"] = api_key
         self.mode = mode
-        self.utils = Utils(mode, base_url, memory_root, util_overrides)
+        # embedder / vector_store / classifier 是同三个能力的旧参数名，收进来一起
+        # 归一（见 _ALIASES）：它们收对象、能力名那路收工厂，Utils.get 两种都认，
+        # 所以现在只有一条路，不再需要两套代码各走各的。
+        overrides = _canon({**util_overrides, "embedder": embedder,
+                            "vector_store": vector_store, "classifier": classifier})
+        overrides = {k: v for k, v in overrides.items() if v is not None}
+        self.utils = Utils(mode, base_url, memory_root, overrides)
 
         audio = mode == "multi_modal"
-        # 只有被用户覆盖的能力才注入组件（embedding/memory_engine/schema）；否则组件用自己的默认
-        pick = lambda n: self.utils.get(n) if n in util_overrides else None
+        # 只有被用户覆盖的能力才注入组件；否则组件用自己的默认。
+        pick = lambda n: self.utils.get(n) if n in overrides else None
 
         # 5 个音频能力开关：显式传值优先，否则由 mode 推导
         # （multi_modal 全开，其余音频项关；情绪项在非 left_brain_single 下开）。
@@ -209,10 +245,9 @@ class Orchestrator:
         if enable_abnormal_sound is None: enable_abnormal_sound = audio
         if enable_voiceprint is None:     enable_voiceprint = audio
         if enable_emotion is None:        enable_emotion = mode != "left_brain_single"
-        # 直接注入的组件依赖优先；否则回落到 util_overrides 里对应能力的覆盖对象。
-        if embedder is None:     embedder = pick("embedding")
-        if vector_store is None: vector_store = pick("memory_engine")
-        if classifier is None:   classifier = pick("schema")
+        embedder     = pick("embedding")
+        vector_store = pick("memory_engine")
+        classifier   = pick("slots")
 
         self._vector_store = vector_store   # 注入的 memory engine（默认 None → mem0）
         # 默认落在**当前工作目录**下，不是包的安装位置。
@@ -239,7 +274,7 @@ class Orchestrator:
         self._multi_modal.mkdir(parents=True, exist_ok=True)
         self._cognitive_db = self._db_path
         self._user_id = user_id
-        self._base_url = base_url or os.environ.get("OPENAI_BASE_URL") or None
+        self._base_url = resolve_base_url(base_url)
         # Official/default is OpenAI embeddings (OpenAILocalEmbedder, built
         # lazily in _get_repo() below); pass a different TextEmbedder-
         # conforming object here to use something else for the left-brain
@@ -575,22 +610,22 @@ class Orchestrator:
         # 跟左脑共用一份缓存：这里要的实体（'坚果'/'素食主义者'/'用户'）左脑刚
         # embed 过一轮，一模一样的字符串没必要再发一次。
         from voicemem.utils.common import embed_cache
-        model = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+        model = resolve_model(role="embedding")
         return embed_cache.resolve(model, [text], self._embed_uncached)[0]
 
     def _embed_uncached(self, texts: list[str]) -> list[list[float]]:
         from openai import OpenAI
         client = OpenAI(
-            api_key=os.environ.get("OPENAI_API_KEY"),
+            api_key=resolve_api_key(),
             base_url=self._base_url,
             timeout=15.0,
         )
         _kw = {
-            "model": os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
+            "model": resolve_model(role="embedding"),
             "input": texts,
             "encoding_format": "float",   # 部分兼容后端不支持 base64
         }
-        if "openrouter" in str(self._base_url or os.environ.get("OPENAI_BASE_URL", "")).lower():
+        if "openrouter" in str(resolve_base_url(self._base_url) or "").lower():
             _kw["extra_body"] = {"provider": {"order": ["OpenAI"], "allow_fallbacks": False}}
         resp = client.embeddings.create(**_kw)
         _exp = int(os.environ.get("VOICEMEM_EMBED_DIM", "1536"))
@@ -605,12 +640,12 @@ class Orchestrator:
         try:
             from openai import OpenAI
             client = OpenAI(
-                api_key=os.environ.get("OPENAI_API_KEY"),
+                api_key=resolve_api_key(),
                 base_url=self._base_url,
                 timeout=15.0,
             )
             resp = client.chat.completions.create(
-                model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+                model=resolve_model(),
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
                 temperature=0,
@@ -628,12 +663,12 @@ class Orchestrator:
         try:
             from openai import OpenAI
             client = OpenAI(
-                api_key=os.environ.get("OPENAI_API_KEY"),
+                api_key=resolve_api_key(),
                 base_url=self._base_url,
                 timeout=15.0,
             )
             resp = client.chat.completions.create(
-                model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+                model=resolve_model(),
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0,
                 max_tokens=max_tokens,
@@ -891,7 +926,7 @@ class Orchestrator:
         try:
             from openai import OpenAI
             client = OpenAI(
-                api_key=os.environ.get("OPENAI_API_KEY"),
+                api_key=resolve_api_key(),
                 base_url=self._base_url,
                 timeout=10.0,
             )
@@ -934,7 +969,7 @@ class Orchestrator:
                 user_content = f"What the user said: {text}\nEmotion: {emotion}{entity_hint}"
 
             resp = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=resolve_model(),
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user",   "content": user_content},

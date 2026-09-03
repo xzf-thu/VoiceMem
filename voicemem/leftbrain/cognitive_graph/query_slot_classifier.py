@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .slot_v2 import ALL_SLOT_V2_VALUES
+from voicemem.llm_config import resolve_api_key, resolve_model
 
 logger = logging.getLogger(__name__)
 
@@ -82,11 +83,7 @@ class SlotClassifierConfig:
     timeout: float = 15.0
 
     def resolved_model(self) -> str:
-        return (
-            self.model
-            or os.environ.get("OPENAI_MODEL", "").strip()
-            or "gpt-4o-mini"
-        ).strip()
+        return resolve_model(self.model)
 
 
 @dataclass
@@ -109,7 +106,7 @@ class QuerySlotClassifier:
     def _build_client(self) -> Any:
         from openai import OpenAI
         kw: dict[str, Any] = {
-            "api_key": self._cfg.api_key or os.environ.get("OPENAI_API_KEY"),
+            "api_key": resolve_api_key(self._cfg.api_key),
             "timeout": self._cfg.timeout,
         }
         if self._cfg.base_url:

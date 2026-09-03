@@ -18,10 +18,13 @@ from pydantic import BaseModel
 # voicemem/leftbrain/local_e5_embedder.py；这里 re-export 保持 `utils.LocalE5Embedder`
 # / `utils.shared_e5()` 的既有调用点不变（run.py 用它注入 VoiceMem(embedding=...)）。
 from voicemem.leftbrain.local_e5_embedder import LocalE5Embedder, shared_e5  # noqa: F401
+from voicemem.llm_config import resolve_model
 
 HERE = Path(__file__).resolve().parent
-CHAT_MODEL = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o")
-RT_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime")
+#: demo 的回复模型。默认比后台整理用的强一档——这一路用户直接听得见。
+#: VOICEMEM_REPLY_MODEL（或旧名 OPENAI_CHAT_MODEL）/ models={"reply": ...} 都能覆盖。
+CHAT_MODEL = resolve_model(role="reply", default="gpt-4o")
+RT_MODEL = resolve_model(role="realtime")
 #: realtime 的音色。一直没设过，默认那个（alloy）念起来最平。
 #: gpt-realtime 上可选：alloy / ash / ballad / coral / echo / sage / shimmer /
 #: verse / marin / cedar —— marin 和 cedar 是新加的，起伏和呼吸感明显强。
@@ -60,7 +63,7 @@ def realtime_connect(reply=None):
     """方案 A：整段麦克风音频平行喂给它出原生语音。事件名随 SDK 版本可能微调
     （对照 openai_voice_demo/backend/providers/realtime.py）。"""
     _, cfg = _reply_seg(reply, "realtime")
-    return client.realtime.connect(model=cfg.get("model") or RT_MODEL)
+    return client.realtime.connect(model=resolve_model(cfg.get("model"), "realtime"))
 
 
 # ── SearchResult → 脑图 html 认识的 memory_hits 负载 ──────────────────────────

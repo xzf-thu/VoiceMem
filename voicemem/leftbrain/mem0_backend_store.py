@@ -86,6 +86,7 @@ from voicemem.leftbrain.local_memory_store import (
     date_overlap_bonus,
     query_dates,
 )
+from voicemem.llm_config import resolve_model
 
 
 def _as_date(v) -> str:
@@ -95,7 +96,7 @@ def _as_date(v) -> str:
 
 
 def _resolve_chat_model() -> str:
-    return (os.environ.get("OPENAI_MODEL") or "").strip() or "gpt-4o-mini"
+    return resolve_model()
 
 
 class _Mem0EmbedderAdapter:

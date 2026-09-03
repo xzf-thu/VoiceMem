@@ -9,7 +9,7 @@
     vm.ingest("中午和 Alex 吃了拉面")
     vm.search("我中午吃了什么")                    # 左右脑一起检索
     vm.left_brain.search(...) / vm.right_brain.search(...)
-    VoiceMem(embedding=lambda: MyE(), schema=lambda: MyClassifier())   # 换掉某个能力
+    VoiceMem(embedding=lambda: MyE(), slots=lambda: MyClassifier())    # 换掉某个能力
 
 mode 决定加载哪些能力：left_brain_single / text_mode / multi_modal(带音频)。
 
@@ -27,6 +27,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from voicemem.orchestrator import Orchestrator, SearchResult, Utils
+from voicemem.llm_config import MODELS
 
 # SearchResult / Utils 经此 re-export，保持 `from voicemem.core import ...` 与
 # `from voicemem import SearchResult, Utils` 可用。
@@ -56,7 +57,15 @@ class VoiceMem:
 
     def __init__(self, api_key=None, mode="text_mode", memory_root=None,
                  user_id="voice_user", base_url=None, reply=None,
-                 openai_key=None, top_k=5, space=None, **kw):
+                 openai_key=None, top_k=5, space=None, models=None, **kw):
+        # openai_key 是 api_key 的旧名字，等价，保留兼容。新代码用 api_key。
+        # 每个模型都能单独选：{"chat": ..., "reply": ..., "embedding": ...,
+        # "tts": ..., "realtime": ...}。省略的角色照旧走 env / 默认值。
+        # 注意这是**进程级**设置，不是这个实例私有的：左右脑那一堆组件懒加载、
+        # 取值时才现读全局表。同一进程里开第二个 VoiceMem 传了不同模型，第一个
+        # 也会跟着变（真发生时 MODELS.update 会打一行）。要严格隔离就分进程。
+        if models:
+            MODELS.update(models)
         # space：一套记忆一个目录，落在 ./voicemem_memoryspace/<space>/。
         # 不给就是 "demo"。memory_root 显式给了就照用（评测要每段对话一个独立库）。
         self._o = Orchestrator(api_key=api_key or openai_key,
@@ -65,6 +74,12 @@ class VoiceMem:
                                user_id=user_id, base_url=base_url, **kw)
         # 回复层是门面级的事（编排层只到记忆结果为止），所以 reply 不往下透传。
         # None → 首次用到时回落到内置 openai provider，见 _reply_fn。
+        #
+        # reply 为什么不做成第十个能力位（tts 是能力位，两者都在输出侧）：能力位
+        # 的值既可以是工厂也可以是造好的对象，靠"是不是函数/类"区分（Utils.get）。
+        # 而**回复 provider 本身就是一个函数**——`VoiceMem(reply=my_async_gen_fn)`
+        # 传进来的东西会被当成工厂调一次，正好调错。这个歧义是回复层独有的，
+        # 所以它单独走 normalize() 那条路，不进能力表。
         self._reply_src = reply
         self._reply_norm = None
         self._top_k = top_k                  # search() 的默认取几条
@@ -78,7 +93,7 @@ class VoiceMem:
         """声明式构造：一个统一 config dict 配齐所有本地/api 模型（仿 mem0）。
 
         每个组件写成 ``{"provider": ..., "config": {...}}``，打开一个 dict 就知道
-        每个模型走本地还是 api。这是在现有 ``VoiceMem(embedding=fn, schema=fn, …)``
+        每个模型走本地还是 api。这是在现有 ``VoiceMem(embedding=fn, slots=fn, …)``
         注入机制之上的一层糖，现有构造方式照常工作。provider 映射表见
         ``voicemem.config``。::
 

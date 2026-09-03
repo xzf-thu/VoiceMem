@@ -1,12 +1,12 @@
 """本地 query 分类器：query → slots(+entities)，全程不碰 LLM/网络。
 
-和内置 ``QuerySlotClassifier``（单次 LLM）接口对齐，可通过 ``VoiceMem(schema=...)``
+和内置 ``QuerySlotClassifier``（单次 LLM）接口对齐，可通过 ``VoiceMem(slots=...)``
 注入替换它，把 ``Classify`` 这一步（抽 slot + entity）从 OpenAI API 切成本地模型——
 和 ``embedding`` 注入完全对称：
 
     from voicemem import VoiceMem
     from voicemem.leftbrain.cognitive_graph.local_query_classifier import LocalQueryClassifier
-    vm = VoiceMem(schema=lambda: LocalQueryClassifier())   # slots 走本地 E5，0 LLM
+    vm = VoiceMem(slots=lambda: LocalQueryClassifier())    # slots 走本地 E5，0 LLM
     vm.search("我在哪工作")                                  # Classify 不再打 LLM
 
 设计取舍（都如实说明，不藏）：
@@ -32,7 +32,7 @@ from voicemem.leftbrain.cognitive_graph.query_slot_classifier import QueryClassi
 # 跟记忆向量共用同一份 E5（models/embedding/），省一份权重
 def _model_name() -> str:
     from voicemem.utils.common.paths import hf_model
-    return hf_model("embedding", "intfloat/multilingual-e5-small", "VOICEMEM_E5_MODEL")
+    return hf_model("embedding", "intfloat/multilingual-e5-small", "e5")
 
 
 _MODEL_NAME = _model_name()

@@ -4,7 +4,8 @@
 - User：``mem0_additive_prompt_build.generate_additive_extraction_prompt``
 - OpenAI Chat JSON：顶层 ``memory`` 数组，元素含 ``id`` / ``text`` / ``attributed_to`` / 可选 ``linked_memory_ids``
 
-默认 Chat 模型：``gpt-4o-mini``（可用 ``OPENAI_MODEL`` 或 ``OpenAIAdditiveExtractorConfig(model=...)`` 覆盖）
+默认 Chat 模型：``gpt-4o-mini``（``chat`` 角色，可用 ``VOICEMEM_CHAT_MODEL`` /
+``VoiceMem(models={"chat": ...})`` / ``OpenAIAdditiveExtractorConfig(model=...)`` 覆盖）
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from voicemem.leftbrain.mem0_additive_prompt_build import (
 )
 
 from voicemem.utils.common.cost_log import log_usage as _log_usage
+from voicemem.llm_config import resolve_api_key, resolve_model
 
 
 def remove_code_blocks(content: str) -> str:
@@ -186,7 +188,7 @@ class OpenAIAdditiveExtractorConfig:
     use_input_language: bool = True
 
     def resolved_model(self) -> str:
-        return (self.model or os.environ.get("OPENAI_MODEL", "").strip() or "gpt-4o-mini").strip()
+        return resolve_model(self.model)
 
 
 # 追加在 upstream 抽取 prompt 之后（不改 additive_extraction_prompt.txt 本身）。
@@ -290,7 +292,7 @@ class OpenAIMem0V3AdditiveExtractor:
         except ImportError as e:
             raise ImportError("请安装: pip install openai>=1.0") from e
 
-        api_key = self._cfg.api_key or os.environ.get("OPENAI_API_KEY")
+        api_key = resolve_api_key(self._cfg.api_key)
         if not api_key:
             raise ValueError("缺少 OPENAI_API_KEY（或在 OpenAIAdditiveExtractorConfig(api_key=...) 传入）")
 
@@ -545,7 +547,7 @@ class ConflictResolver:
         except ImportError as e:
             raise ImportError("请安装: pip install openai>=1.0") from e
 
-        api_key = self._cfg.api_key or os.environ.get("OPENAI_API_KEY")
+        api_key = resolve_api_key(self._cfg.api_key)
         if not api_key:
             raise ValueError("缺少 OPENAI_API_KEY")
 

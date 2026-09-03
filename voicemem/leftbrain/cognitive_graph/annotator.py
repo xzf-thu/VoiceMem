@@ -24,6 +24,7 @@ from .types import (
     EntityType,
     RelationAnnotation,
 )
+from voicemem.llm_config import resolve_api_key, resolve_model
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,7 @@ class CognitiveAnnotatorConfig:
     timeout: float = 60.0
 
     def resolved_model(self) -> str:
-        return (self.model or os.environ.get("OPENAI_MODEL", "").strip() or "gpt-4o-mini").strip()
+        return resolve_model(self.model)
 
 
 # ── Annotator ──────────────────────────────────────────────────────────────────
@@ -128,7 +129,7 @@ class CognitiveAnnotator:
         except ImportError as e:
             raise ImportError("需要 openai>=1.0: pip install openai") from e
         kw: dict[str, Any] = {
-            "api_key": self._cfg.api_key or os.environ.get("OPENAI_API_KEY"),
+            "api_key": resolve_api_key(self._cfg.api_key),
             "timeout": self._cfg.timeout,
         }
         if self._cfg.base_url:

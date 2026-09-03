@@ -47,10 +47,15 @@ class SpeakerEncoder:
             return
         # models 目录在父进程这边解析好再传下去。worker 是独立脚本，自己算过一份，
         # 但那份漏了 pip 装之后的回退——两份逻辑迟早分叉，这里定死一份。
-        from voicemem.utils.common.paths import models_dir
+        from voicemem.utils.common.paths import local_model_override, models_dir
 
         env = dict(os.environ)
         env.setdefault("VOICEMEM_MODELS_DIR", str(models_dir()))
+        # worker 不 import voicemem，只认旧的 VOICEMEM_SPEAKER_MODEL；新名字
+        # （VOICEMEM_VOICEPRINT_MODEL）在这儿解析好翻译过去。
+        picked = local_model_override("voiceprint")
+        if picked:
+            env["VOICEMEM_SPEAKER_MODEL"] = picked
 
         # stderr 收到管道里，别丢。之前是 DEVNULL，worker 因为找不到模型文件退出时
         # 外面只看到 "campplus_worker 启动失败: ''"——连原因都没有，而 worker 其实

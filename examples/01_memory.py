@@ -24,7 +24,7 @@ LOCAL = {
     # 不写这行就会跟默认库（多半是 OpenAI 维度建的）撞上。
     "memory_root": str(Path(__file__).resolve().parent / "example_memory"),
 }
-# 注意 top_k 不能写进 from_config —— 它不在认的键里，会被静默丢掉。
+# top_k 也可以写进 from_config（一个 dict 配齐）；写错的键会直接报错，不再静默丢掉。
 # 取几条在 search() 上传。
 
 vm = VoiceMem.from_config({**LOCAL, "mode": "normal"})

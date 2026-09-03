@@ -41,6 +41,7 @@ from voicemem.leftbrain.cognitive_graph.query_slot_classifier import (
     SlotClassifierConfig,
 )
 from voicemem.leftbrain.local_memory_store import MemorySearchHit
+from voicemem.llm_config import resolve_api_key, resolve_model
 
 # ---------------------------------------------------------------------------
 # Module-level embedding cache — shared across all instances in the process.
@@ -221,9 +222,7 @@ class LeftBrainMemoryRepositoryV2(LeftBrainMemoryRepository):
 
         # ── Step 1: LLM classify ─────────────────────────────────────────────
         clf = classifier or QuerySlotClassifier(
-            SlotClassifierConfig(
-                base_url=os.environ.get("OPENAI_BASE_URL") or None,
-            )
+            SlotClassifierConfig(base_url=self._base_url)
         )
         classification = clf.classify(query)
         print(f"[slot_classifier] query={query!r}  →  slots={classification.slots}  entities={classification.entities}")
@@ -356,11 +355,11 @@ class LeftBrainMemoryRepositoryV2(LeftBrainMemoryRepository):
             )
             from openai import OpenAI
             client = OpenAI(
-                api_key=os.environ.get("OPENAI_API_KEY"),
-                base_url=os.environ.get("OPENAI_BASE_URL") or None,
+                api_key=resolve_api_key(),
+                base_url=self._base_url,
             )
             resp = client.chat.completions.create(
-                model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+                model=resolve_model(),
                 messages=[{"role": "user", "content": summary_prompt}],
                 max_tokens=200,
                 temperature=0,

@@ -262,6 +262,7 @@ class LeftBrain:
                     db_path=_space.db(self._memory_root),
                     cognitive_db_path=self._cognitive_db,
                     enable_cognitive_graph=True,
+                    base_url=self._base_url,
                 )
                 self._cache["repo"] = LeftBrainMemoryRepositoryV2(
                     embedder, config=cfg, cognitive_annotator=annotator,

@@ -29,6 +29,7 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
+from voicemem.llm_config import resolve_api_key, resolve_model
 
 
 # ── 结果容器 ───────────────────────────────────────────────────────────────────
@@ -843,12 +844,12 @@ significant 不管真假，其余字段都要照填（调用方另有判定）�
 
             from openai import OpenAI
             client = OpenAI(
-                api_key=os.environ.get("OPENAI_API_KEY"),
+                api_key=resolve_api_key(),
                 base_url=self._base_url,
                 timeout=60.0,
             )
             resp = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=resolve_model(),
                 messages=[
                     {"role": "system", "content": (
                         "你是记忆清洁助手。分析以下情感记忆列表，做两类判断。\n"

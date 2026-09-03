@@ -27,6 +27,7 @@ from voicemem.leftbrain.cognitive_graph import (
     CognitiveGraphStore,
     NullAnnotator,
 )
+from voicemem.llm_config import resolve_base_url
 
 _DEFAULT_JSON_NAME = "memories.json"
 _DEFAULT_COGNITIVE_DB_NAME = "cognitive_graph.sqlite"
@@ -46,6 +47,9 @@ class LeftBrainMemoryRepositoryConfig:
     # 认知图
     cognitive_db_path: Path | None = None
     enable_cognitive_graph: bool = False
+    #: 后台整理用的 LLM 端点。不给就回落 OPENAI_BASE_URL——原来这里没有入口，
+    #: 槽位摘要那一路只读 env，VoiceMem(base_url=...) 对它无效。
+    base_url: str | None = None
 
 
 class LeftBrainMemoryRepository:
@@ -66,6 +70,7 @@ class LeftBrainMemoryRepository:
     ) -> None:
         self._embedder = embedder
         cfg = config or LeftBrainMemoryRepositoryConfig()
+        self._base_url = resolve_base_url(cfg.base_url)
         # cfg.db_path 是调用方（core.py）传入的 "<memory_root>/voicemem_leftbrain.sqlite"
         # —— mem0 迁移前这个文件本身就是向量库，迁移后 mem0 需要的是一整个目录
         # （qdrant collection + history db），取其父目录延续原来"每个 VoiceMem

@@ -22,7 +22,7 @@ import numpy as np
 # 有离线包（models/embedding/）就用本地，否则用 HF id 首次运行自动下
 def _e5_name() -> str:
     from voicemem.utils.common.paths import hf_model
-    return hf_model("embedding", "intfloat/multilingual-e5-small", "VOICEMEM_E5_MODEL")
+    return hf_model("embedding", "intfloat/multilingual-e5-small", "e5")
 
 
 _E5_NAME = _e5_name()

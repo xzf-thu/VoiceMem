@@ -913,7 +913,7 @@ if ARGS.config:
 
 REPLY = CONFIG.get("reply")                           # 传给 utils 的回复函数
 
-# 声明式构造：from_config 是现有注入机制之上的糖（VoiceMem(embedding=fn, schema=fn,…)）。
+# 声明式构造：from_config 是现有注入机制之上的糖（VoiceMem(embedding=fn, slots=fn,…)）。
 #: 每个 Memory Space 一个 VoiceMem 实例，按需建、建好留着。
 #:
 #: 同一进程内建第二个实例几乎不花钱：模型是懒加载 + 进程内复用的，实测建实例

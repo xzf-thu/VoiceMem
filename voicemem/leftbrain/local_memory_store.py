@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol, Sequence, runtime_checkable
+from voicemem.llm_config import resolve_api_key, resolve_model
 
 # 本文件位于 voicemem/leftbrain/，parents[2] == 本仓库根目录
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -193,11 +194,7 @@ class OpenAILocalEmbedderConfig:
     dimensions: int | None = None  # skip probe if known
 
     def resolved_model(self) -> str:
-        return (
-            self.model
-            or os.environ.get("OPENAI_EMBEDDING_MODEL", "").strip()
-            or "text-embedding-3-small"
-        ).strip()
+        return resolve_model(self.model, "embedding")
 
 
 class OpenAILocalEmbedder:
@@ -211,7 +208,7 @@ class OpenAILocalEmbedder:
         except ImportError as e:
             raise ImportError("本地向量需要: pip install openai>=1.0") from e
 
-        api_key = self._cfg.api_key or os.environ.get("OPENAI_API_KEY")
+        api_key = resolve_api_key(self._cfg.api_key)
         if not api_key:
             raise ValueError("缺少 OPENAI_API_KEY（或 OpenAILocalEmbedderConfig(api_key=...)）")
 
