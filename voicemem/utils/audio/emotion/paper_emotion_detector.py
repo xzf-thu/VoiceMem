@@ -35,21 +35,29 @@ from voicemem.utils.audio.emotion.vad_trigger import is_negative_vad_significant
 
 
 def _vad_to_label(valence: float, arousal: float) -> str:
-    """VAD 象限 → 粗粒度中文标签，供「不显著」或 Qwen-Omni 不可用时兜底。
+    """VAD 象限 → 粗粒度情绪标签，供「不显著」或 Qwen-Omni 不可用时兜底。
 
     标签词表对齐 ``anchor_router._CANONICAL_EMOTIONS``（右脑情绪锚点用的
     固定 8 类），保证兜底路径产出的标签也能被下游正确识别/归一化，而不是
     像 emotion2vec 的"中性"兜底那样，模型没触发就永远给同一个值。
+
+    输出按**库语言**写（见 ``voicemem.lang``）：内部值是中文，但这个标签会存进
+    记忆、也会显示给用户，英文库里冒出「开心」就是 bug。英文写法同样在
+    anchor_router 的英文词表里，读回来能归一回同一个内部值。
     """
+    from voicemem.lang import display_emotion
     if valence >= 0.15:
-        return "开心" if arousal >= 0.4 else "平静"
-    if valence <= -0.15:
+        canon = "开心" if arousal >= 0.4 else "平静"
+    elif valence <= -0.15:
         if arousal >= 0.55:
-            return "焦虑"
-        if arousal >= 0.35:
-            return "委屈"
-        return "悲伤"
-    return "平静" if arousal < 0.4 else "纠结"
+            canon = "焦虑"
+        elif arousal >= 0.35:
+            canon = "委屈"
+        else:
+            canon = "悲伤"
+    else:
+        canon = "平静" if arousal < 0.4 else "纠结"
+    return display_emotion(canon)
 
 
 def _load_omni(model_path: str, *, device_map: str) -> tuple[Any, Any, Any]:

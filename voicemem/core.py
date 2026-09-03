@@ -61,9 +61,7 @@ class VoiceMem:
                  memory_language=None, **kw):
         # 存进记忆的文本用什么语言："en"（默认）或 "zh"。见 voicemem/lang.py。
         # slot 名和 8 个规范情绪是内部枚举，不受影响。
-        if memory_language:
-            from voicemem.lang import set_memory_language
-            set_memory_language(memory_language)
+        # 语言落在**这个实例对应的空间**上，不是进程全局——见 resolve_for_space。
         # openai_key 是 api_key 的旧名字，等价，保留兼容。新代码用 api_key。
         # 每个模型都能单独选：{"chat": ..., "reply": ..., "embedding": ...,
         # "tts": ..., "realtime": ...}。省略的角色照旧走 env / 默认值。
@@ -89,6 +87,9 @@ class VoiceMem:
         self._reply_src = reply
         self._reply_norm = None
         self._top_k = top_k                  # search() 的默认取几条
+        # 空间目录这时才确定（Orchestrator 解析 space/memory_root），所以放在后面。
+        from voicemem.lang import resolve_for_space
+        resolve_for_space(self._o._memory_root, memory_language)
         self.mode = self._o.mode
         self.utils = self._o.utils
         self.left_brain = self._o._left      # 真组件

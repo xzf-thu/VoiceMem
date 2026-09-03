@@ -989,7 +989,13 @@ class Orchestrator:
             )
             user_name = self._get_user_name()
             entity_hint = f", involving: {', '.join(entities)}" if entities else ""
-            is_chinese = self._is_english(text) is False and any("一" <= c <= "鿿" for c in text)
+            # 跟**库语言**走，不跟用户这一句用什么语言走。
+            #
+            # 原来是按这句话有没有中文字符判的：英文库里用户偶尔冒一句中文，
+            # inner_os 就成了中文，跟同一条记忆的其它字段脱节。语言是库的属性，
+            # 见 voicemem/lang.py。
+            from voicemem.lang import is_zh as _os_is_zh
+            is_chinese = _os_is_zh()
             pronoun = user_name if user_name else ("用户" if is_chinese else "they")
             if is_chinese:
                 system_prompt = (
