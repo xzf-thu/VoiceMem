@@ -680,7 +680,7 @@ class RightBrain:
     #: 归因每段的字数上限——这几段每轮都要拼进 system prompt，松了就是固定开销。
     _EXPERIENCE_MAX_CHARS = 60
 
-    _ATTRIBUTION_PROMPT = """你在给助手的回应打分：用户这轮是不是在对助手那句作出反应？只输出 JSON。
+    _ATTRIBUTION_PROMPTS = {"zh": """你在给助手的回应打分：用户这轮是不是在对助手那句作出反应？只输出 JSON。
 
 助手那句：{reply}
 用户这轮：{user}{emotion_line}
@@ -699,7 +699,27 @@ significant 默认 false，只有这几种才 true：
 以下一律 false：继续讲自己的事、回答助手的问题、提新要求、寒暄。
 用户情绪不好 ≠ 助手说错话。
 significant 不管真假，其余字段都要照填（调用方另有判定）。
-文本字段各 ≤{n} 字，语言跟用户那句一致。"""
+文本字段各 ≤{n} 字，使用中文。""",
+        "en": """Decide whether the user is reacting to the assistant's reply. Output JSON only.
+
+The assistant's reply: {reply}
+The user's response: {user}{emotion_line}
+
+{{"significant": bool,
+  "assistant_helped": "whether the reply helped (true) or made things worse (false)",
+  "user_reaction": "the user's reaction, with the user as the subject",
+  "why": "what specifically in the assistant's reply caused that reaction",
+  "user_trait": {{"slot": "表达风格|应对方式|思维模式|喜好与厌恶", "label": "a lasting
+    user trait revealed by the reaction, such as 'shuts down when given solutions' or
+    'speaks plainly when dissatisfied'; use null for a one-off situational reaction"}}}}
+
+significant is false by default. Set it to true only for explicit dissatisfaction,
+correction, explicit thanks or approval, an obvious emotional change caused by the
+assistant's reply, or a dismissive ending such as "whatever" or "never mind".
+Continuing the story, answering a question, making a new request, and small talk are
+all false. The user feeling bad does not mean the assistant did something wrong.
+Fill every field even when significant is false; callers make additional decisions.
+Keep each text field at most {n} characters and write it in English."""}
 
     def _attribute_reaction(self, user_text: str, agent_reply: str, emotion: str) -> dict:
         """(助手上一句 + 用户这轮) → 归因：记不记 + 反应/为什么/下次怎么做。
@@ -713,8 +733,13 @@ significant 不管真假，其余字段都要照填（调用方另有判定）�
         forced_failed = bool(sigs.dissatisfaction_signal or sigs.correction_signal)
         forced = forced_failed or _hits_any(user_text, _APPRECIATION_CUES)
 
-        emotion_line = f"\n（情绪识别：{emotion}）" if emotion else ""
-        raw = self._llm_json(self._ATTRIBUTION_PROMPT.format(
+        from voicemem.lang import memory_language
+        language = memory_language()
+        emotion_line = (
+            (f"\n（情绪识别：{emotion}）" if language == "zh" else
+             f"\nDetected emotion: {emotion}") if emotion else ""
+        )
+        raw = self._llm_json(self._ATTRIBUTION_PROMPTS[language].format(
             reply=agent_reply[:300], user=user_text[:300],
             emotion_line=emotion_line, n=self._EXPERIENCE_MAX_CHARS,
         ))
@@ -786,6 +811,11 @@ significant 不管真假，其余字段都要照填（调用方另有判定）�
                 # 证据用**用户原话**，不是助手这条经验——归因是读证据来写描述的，
                 # 挂 exp 就成了「拿助手的做法去描述用户特征」。
                 if label and label.lower() not in ("null", "none"):
+                    from voicemem.lang import is_zh
+                    label_is_zh = any("一" <= ch <= "鿿" for ch in label)
+                    if label_is_zh != is_zh():
+                        print(f"[RBTrait] 语言不符，丢弃：{slot_name} ← {label}", flush=True)
+                        return
                     from voicemem.rightbrain.traits_store import Evidence
                     if self._traits().add(
                             self._user_id, slot_name, label,
