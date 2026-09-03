@@ -1393,7 +1393,7 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, said=None):
     finally:
         await queue.put(None)                   # 生成出错也要让 speak() 收工
 
-    if interrupted:
+    def _drop_pipeline():
         # 别把 speak() 留在后台继续往一条已经停播的连接上发音频。
         # 提前起跑的那几段合成也要一起停，否则它们会继续占着远端 TTS 的队列，
         # 下一轮的第一句得排在这些没人要的音频后面——听起来就是打断之后更卡。
@@ -1401,10 +1401,21 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, said=None):
         synther.cancel()
         for t in synths:
             t.cancel()
+
+    if interrupted:
+        _drop_pipeline()
     else:
-        await synther
-        await speaker
-        await send({"type": "answer_done"})
+        # 生成完了不等于说完了：音频还在一段段往外发，打断多半就落在这儿。
+        # 不接住的话 CancelledError 会直接掀掉这个 Task，下面的存记忆一行都不跑，
+        # 被打断的那一轮就永远进不了记忆。
+        try:
+            await synther
+            await speaker
+        except asyncio.CancelledError:
+            interrupted = True
+            _drop_pipeline()
+        else:
+            await send({"type": "answer_done"})
 
     # 存这一轮：被打断时存的是用户真正听到的那半句。
     # 先落记忆再收工——ingest 排在音频后面的话，用户一听完就关页面（语音场景很
@@ -1710,36 +1721,63 @@ async def llm_tts_session(sock):
 
     现在回复丢进后台任务，读 socket 的循环一刻不停；听到人声就取消那个任务。
     """
-    turn = {"task": None, "t0": 0.0, "reply": {"text": ""}}
+    # until：前端预计几点才把已发出去的音频播完（见 hearing()）。
+    turn = {"task": None, "t0": 0.0, "until": 0.0, "reply": {"text": ""}}
     owner = {"id": "", "last": "", "miss": 0}
 
-    async def stop_reply():
-        task = turn["task"]
-        if task is None or task.done():
+    def hearing() -> bool:
+        """用户此刻还听不听得见助手。
+
+        不能用 `task.done()` 代替：send_audio 是**不限速**的，TTS 出多快就往
+        socket 里推多快，一段十几秒的回复两三秒就推完了。任务早就 done、前端
+        那边还在播剩下的十几秒——这期间插话，原来的 stop_reply 直接 return，
+        前端从没收到 answer_interrupt，表现正是"打断没反应，它非要念完"。
+        所以按**已发出去的音频时长**算，跟 realtime 那条路一致：24k PCM16，
+        一个样本 2 字节。
+        """
+        t = turn["task"]
+        return (t is not None and not t.done()) or time.monotonic() < turn["until"]
+
+    async def send_audio(pcm: bytes):
+        """发音频，顺带记账。前端是排队播的（pcm-player-worklet），这里跟着算
+        同一条时间线：上一块播完之后再接这一块。"""
+        turn["until"] = max(turn["until"], time.monotonic()) + len(pcm) / 2 / MIC_RATE
+        if not turn["t0"]:
+            # 宽限期从**助手真的出声**那一刻起算，不是从任务创建。TTS 首帧要
+            # ~1.2s，按任务创建算的话宽限期在它开口前就过完了，等于没有。
+            turn["t0"] = time.monotonic()
+        await sock.send_bytes(pcm)
+
+    async def stop_reply(force: bool = False):
+        if not hearing():
+            turn["task"] = None
             return
-        since = (time.monotonic() - turn["t0"]) * 1000
-        if since < BARGE_GRACE_MS:
+        since = (time.monotonic() - turn["t0"]) * 1000 if turn["t0"] else 0.0
+        if not force and turn["t0"] and since < BARGE_GRACE_MS:
             if BARGE_DEBUG:
                 print(f"[barge] 才说了 {since:.0f}ms，还在宽限期内，不打断", flush=True)
             return
-        task.cancel()
-        turn["task"] = None
+        if BARGE_DEBUG:
+            left = max(0.0, turn["until"] - time.monotonic()) * 1000
+            print(f"[barge] ★ 打断：转写触发（前端还剩 {left:.0f}ms 没播完）", flush=True)
+        task = turn["task"]
+        if task is not None and not task.done():
+            task.cancel()
+        turn["task"], turn["until"] = None, 0.0
         try:
             await sock.send_json({"type": "answer_interrupt"})   # 前端停播已排队的音频
         except Exception:
             pass
 
-    def replying():
-        t = turn["task"]
-        return t is not None and not t.done()
-
     async for pending in anticipate(sock, on_speech=stop_reply, owner=owner,
-                                    is_busy=replying, said=lambda: turn["reply"]["text"]):
-        await stop_reply()                    # 上一轮还没说完就被新的一轮顶掉
-        turn["t0"] = time.monotonic()
+                                    is_busy=hearing, said=lambda: turn["reply"]["text"]):
+        # 上一轮还没播完就被新的一轮顶掉。force：这里不能被宽限期挡下来，挡下来
+        # 旧任务会继续往同一条 socket 里灌音频，两轮交织着播。
+        await stop_reply(force=True)
+        turn["t0"] = turn["until"] = 0.0
         turn["reply"]["text"] = ""            # 新一轮，回声比对从空的开始
         turn["task"] = asyncio.create_task(
-            voicemem_llm_tts(pending, sock.send_json, sock.send_bytes, owner,
+            voicemem_llm_tts(pending, sock.send_json, send_audio, owner,
                              said=turn["reply"]))
 
 
