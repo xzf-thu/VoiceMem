@@ -1100,6 +1100,7 @@ class Orchestrator:
         observed_at: str | None = None,
         async_facts: bool = False,
         agent_reply: str | None = None,
+        on_complete=None,
     ) -> dict:
         """将一条语音输入存入记忆库。
 
@@ -1123,6 +1124,9 @@ class Orchestrator:
             agent 对这句话的回复。不传就自动取 ``vm.reply()`` 登记过的那句，所以
             "先回复、再存"的标准流程不用改；回复不走 ``vm.reply()`` 的显式给一句。
             左脑拿它给用户那句消歧，右脑拿**上一轮**的回复做情绪归因。
+        on_complete:
+            可选回调，事实和右脑写入完成后接收最终结果字典。使用
+            ``async_facts=True`` 时回调在后台线程执行。
 
         Returns
         -------
@@ -1177,6 +1181,14 @@ class Orchestrator:
                 daemon=True,
             ).start()
 
+        def _notify_complete(result: dict) -> None:
+            if on_complete is None:
+                return
+            try:
+                on_complete(result)
+            except Exception as e:
+                print(f"[ingest] on_complete 回调失败：{type(e).__name__}: {e}", flush=True)
+
         # async_facts=True：事实抽取 + 图谱写入（耗时的部分）扔进后台线程，
         # Ingest() 立刻带着已同步算完的 audiomem 字段返回。默认 False。
         if async_facts:
@@ -1188,11 +1200,12 @@ class Orchestrator:
                 实测六轮连说丢掉两轮就是这么丢的，查了很久才定位到。
                 """
                 try:
-                    self._finish_ingest(ctx)
+                    _notify_complete(self._finish_ingest(ctx))
                 except Exception as e:
                     import traceback
                     print(f"[ingest] 这一轮没能入库（{type(e).__name__}: {e}）\n"
                           f"{traceback.format_exc()}", flush=True)
+                    _notify_complete({"error": str(e), "persistent_memory_created": False})
 
             threading.Thread(target=_bg, daemon=True).start()
             return {
@@ -1220,7 +1233,9 @@ class Orchestrator:
                 "new_routine":         None,
             }
 
-        return self._finish_ingest(ctx)
+        result = self._finish_ingest(ctx)
+        _notify_complete(result)
+        return result
 
     def _tag_memories(self, memory_ids, tags) -> None:
         """给一批记忆写 memory_tags；tags=[(name, conf),...]。cog store 不支持就跳过。"""
@@ -1446,6 +1461,7 @@ class Orchestrator:
         return {
             "facts_count":         result.facts_count,
             "memory_ids":          result.memory_ids,
+            "persistent_memory_created": bool(result.memory_ids or heartnote_id),
             "affect":              result.affect,
             "triggered_reminders": triggered_reminders,
             "proactive_memories":  proactive_memories,

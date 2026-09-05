@@ -237,6 +237,16 @@ python web/run.py --log-file results/logs/debug.log
 python web/run.py --no-file-log
 ```
 
+回复模型的上下文由当前输入、本次会话尚未入库的对话和检索记忆组成。每轮对话先
+进入内存 SessionBuffer；异步记忆写入完成并确认产生持久记忆后，对应 turn 从
+SessionBuffer 移除。没有产生长期记忆的临时对话会保留到本次会话结束，不同
+Memory Space 和不同 WebSocket 会话互相隔离。
+
+播放期间的插话使用两阶段控制：VAD 首先暂停并保留音频队列；明确停止指令或稳定
+ASR 文本确认后才清空队列并取消回复；附和、回声、无文字声音和单音节碎片会恢复
+播放。候选静音回退和最长等待时间可分别通过 `BARGE_REJECT_SILENCE_MS`、
+`BARGE_CANDIDATE_TIMEOUT_MS` 调整。
+
 ## 🧠 VoiceMem：基于流式双脑架构的记忆系统
 
 **VoiceMem** 是一个面向实时语音智能体的记忆系统。
@@ -668,6 +678,18 @@ startup. To choose a path or disable file logging:
 python web/run.py --log-file results/logs/debug.log
 python web/run.py --no-file-log
 ```
+
+Reply context combines the current input, turns from this session that are not
+yet represented by persistent memory, and retrieved memory. Each turn enters an
+in-memory SessionBuffer first. The asynchronous ingest completion callback
+removes it only after persistent memory is created. Buffers are isolated by
+Memory Space and WebSocket session.
+
+Barge-in uses two stages during playback. VAD first pauses playback while
+preserving the audio queue. An explicit stop command or stable ASR updates
+confirm cancellation; backchannels, echo, non-text sounds, and isolated
+syllables resume playback. `BARGE_REJECT_SILENCE_MS` and
+`BARGE_CANDIDATE_TIMEOUT_MS` configure rejection timing.
 
 ## 🧠 VoiceMem: Memory with a Streaming Dual-Brain Architecture
 

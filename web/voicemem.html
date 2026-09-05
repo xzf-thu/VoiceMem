@@ -1604,6 +1604,7 @@ let ws=null, live=false, paused=false;
 /* Continuous PCM playback with adaptive jitter buffering. */
 let playCtx=null, pcmNode=null, pcmReady=null, pcmPending=[], pcmDrainPending=false;
 let pcmStreaming=false, pcmDrainWaiters=[], pcmPrebuffer=0.08, pcmWorkletFailed=false;
+let pcmBargePaused=false;
 let scheduled=[], nextPlay=0;             // 只给“回放原始录音”这类完整 AudioBuffer 用
 
 function resolvePcmDrain(){
@@ -1631,6 +1632,7 @@ function initPcmPlayer(){
       }
     };
     configurePcmPlayer();
+    if(pcmBargePaused) pcmNode.port.postMessage({type:'pause'});
     for(const f32 of pcmPending.splice(0)) enqueuePcm(f32);
     if(pcmDrainPending){ pcmDrainPending=false; pcmNode.port.postMessage({type:'drain'}); }
   }).catch(e=>{
@@ -1687,12 +1689,26 @@ function waitForPcmDrain(maxMs=20000){
 }
 function stopPlayback(){
   setSpokenCaptionPlaying(false);
+  pcmBargePaused=false;
   pcmPending.length=0; pcmDrainPending=false;
   if(pcmNode) pcmNode.port.postMessage({type:'clear'});
   resolvePcmDrain();
   for(const s of scheduled.splice(0)){ try{ s.stop(); }catch(e){} }
   releaseMic();                 // 回放被打断，麦克风不该还被挂着
   if(playCtx) nextPlay=playCtx.currentTime;
+}
+function pausePlaybackForBarge(){
+  if(pcmBargePaused) return;
+  pcmBargePaused=true; setSpokenCaptionPlaying(false);
+  if(pcmNode) pcmNode.port.postMessage({type:'pause'});
+  else if(playCtx) playCtx.suspend();
+}
+function resumePlaybackAfterBarge(){
+  if(!pcmBargePaused) return;
+  pcmBargePaused=false;
+  if(pcmNode) pcmNode.port.postMessage({type:'resume'});
+  else if(playCtx) playCtx.resume();
+  setSpokenCaptionPlaying(true);
 }
 
 /* --- 麦克风 -------------------------------------------------------- */
@@ -2060,6 +2076,12 @@ function handle(m){
       // Advance both captions on the playback clock.
       liveReply+=m.text;
       setSpokenCaptionTarget(liveReply); break;
+
+    case 'answer_pause':
+      pausePlaybackForBarge(); setVoice('user'); break;
+
+    case 'answer_resume':
+      resumePlaybackAfterBarge(); setVoice('ai'); break;
 
     case 'answer_done':
       finishPcmStream();

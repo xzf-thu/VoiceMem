@@ -10,6 +10,7 @@ tests/*
 !tests/test_offline_engine.py
 !tests/test_streaming.py
 !tests/test_demo_from_zero.py
+!tests/test_session_context.py
 
 # 运行时数据：记忆库、评测结果、录音归档
 results/

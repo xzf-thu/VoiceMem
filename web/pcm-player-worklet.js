@@ -6,6 +6,7 @@ class VoiceMemPCMPlayer extends AudioWorkletProcessor {
     this.bufferedFrames = 0;
     this.started = false;
     this.draining = false;
+    this.paused = false;
     this.baseTargetFrames = Math.round(sampleRate * 0.08);
     this.targetFrames = this.baseTargetFrames;
     this.maxTargetFrames = Math.round(sampleRate * 0.32);
@@ -33,6 +34,16 @@ class VoiceMemPCMPlayer extends AudioWorkletProcessor {
         if (!this.bufferedFrames) this._drained();
         return;
       }
+      if (message.type === "pause") {
+        this.paused = true;
+        this._report("paused");
+        return;
+      }
+      if (message.type === "resume") {
+        this.paused = false;
+        this._report("resumed");
+        return;
+      }
       if (message.type === "clear") this._clear(true);
     };
   }
@@ -43,6 +54,7 @@ class VoiceMemPCMPlayer extends AudioWorkletProcessor {
     this.bufferedFrames = 0;
     this.started = false;
     this.draining = false;
+    this.paused = false;
     this.stableFrames = 0;
     if (notify) this.port.postMessage({ type: "drained", bufferedMs: 0 });
   }
@@ -65,6 +77,9 @@ class VoiceMemPCMPlayer extends AudioWorkletProcessor {
     const output = outputs[0] && outputs[0][0];
     if (!output) return true;
     output.fill(0);
+
+    // 候选插话期间输出静音并保留队列，resume 后从暂停位置继续。
+    if (this.paused) return true;
 
     if (!this.started) {
       if (!this.bufferedFrames) return true;
