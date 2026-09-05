@@ -7,6 +7,9 @@ class VoiceMemPCMPlayer extends AudioWorkletProcessor {
     this.started = false;
     this.draining = false;
     this.paused = false;
+    this.outputId = "";
+    this.sourceSampleRate = 24000;
+    this.renderedSamples = 0;
     this.baseTargetFrames = Math.round(sampleRate * 0.08);
     this.targetFrames = this.baseTargetFrames;
     this.maxTargetFrames = Math.round(sampleRate * 0.32);
@@ -21,10 +24,19 @@ class VoiceMemPCMPlayer extends AudioWorkletProcessor {
         this.targetFrames = Math.max(this.baseTargetFrames, this.targetFrames);
         return;
       }
+      if (message.type === "start") {
+        this._clear(false);
+        this.outputId = String(message.outputId || "");
+        this.sourceSampleRate = Math.max(1, Number(message.sampleRate) || 24000);
+        return;
+      }
       if (message.type === "audio" && message.samples) {
         const samples = message.samples;
         if (samples.length) {
-          this.queue.push(samples);
+          this.queue.push({
+            samples,
+            sourceFrames: Math.max(0, Number(message.sourceFrames) || samples.length),
+          });
           this.bufferedFrames += samples.length;
         }
         return;
@@ -44,11 +56,14 @@ class VoiceMemPCMPlayer extends AudioWorkletProcessor {
         this._report("resumed");
         return;
       }
-      if (message.type === "clear") this._clear(true);
+      if (message.type === "clear") {
+        this._clear(message.reason === "interrupted", message.reason || "reset");
+      }
     };
   }
 
-  _clear(notify) {
+  _clear(notify, state = "reset") {
+    if (notify) this._report(state);
     this.queue.length = 0;
     this.offset = 0;
     this.bufferedFrames = 0;
@@ -56,13 +71,14 @@ class VoiceMemPCMPlayer extends AudioWorkletProcessor {
     this.draining = false;
     this.paused = false;
     this.stableFrames = 0;
-    if (notify) this.port.postMessage({ type: "drained", bufferedMs: 0 });
+    this.outputId = "";
+    this.renderedSamples = 0;
   }
 
   _drained() {
+    this._report("drained");
     this._clear(false);
     this.targetFrames = this.baseTargetFrames;
-    this.port.postMessage({ type: "drained", bufferedMs: 0 });
   }
 
   _report(type) {
@@ -70,6 +86,9 @@ class VoiceMemPCMPlayer extends AudioWorkletProcessor {
       type,
       bufferedMs: Math.round((this.bufferedFrames / sampleRate) * 1000),
       targetMs: Math.round((this.targetFrames / sampleRate) * 1000),
+      outputId: this.outputId,
+      renderedSamples: Math.round(this.renderedSamples),
+      sampleRate: this.sourceSampleRate,
     });
   }
 
@@ -91,12 +110,14 @@ class VoiceMemPCMPlayer extends AudioWorkletProcessor {
     let written = 0;
     while (written < output.length && this.queue.length) {
       const head = this.queue[0];
-      const count = Math.min(output.length - written, head.length - this.offset);
-      output.set(head.subarray(this.offset, this.offset + count), written);
+      const count = Math.min(
+        output.length - written, head.samples.length - this.offset);
+      output.set(head.samples.subarray(this.offset, this.offset + count), written);
       written += count;
       this.offset += count;
       this.bufferedFrames -= count;
-      if (this.offset >= head.length) {
+      this.renderedSamples += count * head.sourceFrames / head.samples.length;
+      if (this.offset >= head.samples.length) {
         this.queue.shift();
         this.offset = 0;
       }
@@ -128,7 +149,7 @@ class VoiceMemPCMPlayer extends AudioWorkletProcessor {
     }
 
     this.reportFrames += output.length;
-    if (this.reportFrames >= sampleRate / 4) {
+    if (this.reportFrames >= sampleRate / 5) {
       this.reportFrames = 0;
       this._report("buffer");
     }

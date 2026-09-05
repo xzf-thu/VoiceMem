@@ -17,6 +17,9 @@
 ``_NEED`` 里（不会被 warmup 拉起来），谁要出声谁 ``vm.utils.get("tts")``；
 没装 piper / voxcpm 的用户不受影响。
 
+支持对齐信息的后端可以产出 ``TimedAudioChunk``；时间戳使用相对本段开头的样本
+位置。原有的纯 ``bytes`` 后端不需要修改。
+
 ``speak_stream()`` 是「边生成边合成」：吐满一句就送去合成，不等全文生成完——
 等全文再合成的话，字早打完了音频还没起头（实测 TTS 首帧就要 ~1.2s）。
 """
@@ -28,6 +31,7 @@ import os
 import numpy as np
 
 from voicemem.utils.audio.stream_io import resample
+from voicemem.audio_timing import TimedAudioChunk, TextTimestamp
 from voicemem.llm_config import resolve_model
 
 #: 兼容旧名字。真正的解析在 OpenAITTS.__init__ 里现算（见 llm_config）——
@@ -93,11 +97,18 @@ class BaseTTS:
         后端不支持的（piper / voxcpm）忽略它即可。"""
         tail = b""
         async for chunk in self._raw(text, instruction):
-            buf = tail + chunk
+            timed = chunk if isinstance(chunk, TimedAudioChunk) else None
+            raw = timed.pcm if timed is not None else chunk
+            buf = tail + raw
             cut = len(buf) & ~1                     # 向下取到偶数
             tail = buf[cut:]
             if cut:
-                yield buf[:cut]
+                if timed is None:
+                    yield buf[:cut]
+                else:
+                    yield TimedAudioChunk(
+                        pcm=buf[:cut], timestamps=timed.timestamps,
+                        sample_rate=timed.sample_rate)
         if tail:
             yield tail + b"\x00"                    # 收尾那半个样本补齐
 

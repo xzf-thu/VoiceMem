@@ -99,8 +99,10 @@ if __name__ == "__main__" and not ARGS.no_file_log:
     LOG_FILE = setup_file_logging(_ROOT, ARGS.log_file)
 
 import utils                                         # noqa: E402  同目录管道层
+from audio_timeline import AudioTimeline, SpeechRateEstimator  # noqa: E402
 from session_context import SessionBuffer            # noqa: E402
 from voicemem import VoiceMem                        # noqa: E402
+from voicemem.audio_timing import TimedAudioChunk    # noqa: E402
 
 BARGE_DEBUG = os.environ.get("BARGE_DEBUG", "1") != "0"
 BARGE_THRESHOLD = float(os.environ.get("BARGE_THRESHOLD", "0.45"))  # 越小越容易被打断
@@ -914,8 +916,10 @@ def _history_block(session_id: str, space: str) -> str:
     return _SESSION_CONTEXT.render(session_id, space, "zh" if is_zh() else "en")
 
 
-def _push_history(session_id: str, space: str, user_text: str, reply_text: str) -> str:
-    return _SESSION_CONTEXT.add(session_id, space, user_text, reply_text)
+def _push_history(session_id: str, space: str, user_text: str, reply_text: str,
+                  interrupted: bool = False) -> str:
+    return _SESSION_CONTEXT.add(
+        session_id, space, user_text, reply_text, interrupted=interrupted)
 
 
 def _finish_history_turn(turn_id: str, result: dict) -> None:
@@ -928,7 +932,8 @@ def _finish_history_turn(turn_id: str, result: dict) -> None:
 
 def _realtime_instructions(memory_context: str, stranger: bool = False,
                            replay: bool = False, emotion: str = "",
-                           text: str = "", context_session: str = "") -> str:
+                           text: str = "", context_session: str = "",
+                           context_space: str = "") -> str:
     """人设 + 这一轮检索到的记忆。要说清楚这是「你记得的事」，否则模型会把它当成
     背景资料念出来，而不是当成自己对这个用户的记忆自然地用。
 
@@ -942,7 +947,8 @@ def _realtime_instructions(memory_context: str, stranger: bool = False,
         parts.append(memory_context)
     else:
         parts.append(_NO_MEMORY_NOTE)      # 一条都没检索到：明说不知道，别编
-    session_context = _history_block(context_session, ACTIVE_SPACE)
+    session_context = _history_block(
+        context_session, context_space or ACTIVE_SPACE)
     if session_context:
         parts.append(session_context)
     if _lang_note():
@@ -1340,8 +1346,9 @@ def fill_tags(payload: dict, text: str, audio_path: str = "",
     return payload
 
 
-async def voicemem_llm_tts(pending, send, send_audio, owner, said=None,
-                           context_session=""):
+async def voicemem_llm_tts(pending, send, send_audio, owner, timeline,
+                           said=None, context_session="", context_space="",
+                           memory_vm=None):
     """记忆已在关键路径外预取好：LLM 流式回复 → TTS 流式语音。
 
     TTS 跟生成**并行**：LLM 吐满一句就丢进队列，另一条协程取出来合成、发音频。
@@ -1352,6 +1359,8 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, said=None,
     它挡回声（见 _is_echo）——助手说的话经麦克风绕回 ASR，转出来的字跟真人插话
     在字数上没区别，只能靠内容认。
     """
+    memory_vm = memory_vm or vm
+    context_space = context_space or ACTIVE_SPACE
     await send({"type": "user_transcript", "text": pending.text})
     # 声学情绪**不在这儿算**。它要 2.3 秒（emotion2vec 跑整段音频），而这几行是
     # 用户说完到助手开口之间最要紧的一段——实测这一步就吃掉了 4.5 秒里的一半，
@@ -1367,13 +1376,14 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, said=None,
     if pending.replay:
         _note_replay(pending.replay)
         await send({"type": "play_memory", "memory_id": pending.replay})
-    await send({"type": "answer_start"})
+    await send({"type": "answer_start", "output_id": timeline.output_id,
+                "sample_rate": timeline.sample_rate})
 
     queue: asyncio.Queue = asyncio.Queue()
 
     # 走注入的那个 TTS（第九个可替换位）。--config 里换 provider、或库用户
     # VoiceMem(tts=lambda: MyTTS()) 传自己的实现，都在这儿生效；没配就是内置默认。
-    tts = vm.utils.get("tts")
+    tts = memory_vm.utils.get("tts")
     # 这一轮怎么念。情绪是逐轮变的，所以按轮传，不写在实例上。
     speak_as = _speak_instruction(pending.emotion)
 
@@ -1397,13 +1407,16 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, said=None,
     streams: asyncio.Queue = asyncio.Queue()      # 每项是一段的 chunk 队列
 
     async def synth():
-        while (seg := await queue.get()) is not None:
+        while (spec := await queue.get()) is not None:
+            seg, text_start, text_end = spec
             chunks: asyncio.Queue = asyncio.Queue()
+            state = {"complete": False}
 
-            async def run(seg=seg, chunks=chunks):
+            async def run(seg=seg, chunks=chunks, state=state):
                 try:
-                    async for pcm in _synth_one(seg):
-                        await chunks.put(pcm)
+                    async for chunk in _synth_one(seg):
+                        await chunks.put(chunk)
+                    state["complete"] = True
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
@@ -1412,24 +1425,41 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, said=None,
                     await chunks.put(None)        # 出错也要让播放那边收工
 
             synths.append(asyncio.create_task(run()))
-            await streams.put((seg, chunks))
+            await streams.put((seg, text_start, text_end, chunks, state))
         await streams.put(None)
 
     async def speak():
         while (item := await streams.get()) is not None:
-            seg, chunks = item
+            seg, text_start, text_end, chunks, state = item
+            segment_id = timeline.begin_segment(text_start, text_end)
             # 回声判定要拿**用户可能听到的**去比，不是已生成的——生成早跑到几段
             # 之后了。这里是音频真正开始发出去的时刻，最接近"说出口"。
             if said is not None:
                 said["text"] = (said.get("text") or "") + seg
             try:
-                while (pcm := await chunks.get()) is not None:
+                while (chunk := await chunks.get()) is not None:
+                    if isinstance(chunk, TimedAudioChunk):
+                        if chunk.sample_rate != timeline.sample_rate:
+                            raise ValueError(
+                                f"TTS 输出采样率应为 {timeline.sample_rate}Hz，"
+                                f"实际为 {chunk.sample_rate}Hz")
+                        pcm = chunk.pcm
+                        timeline.add_segment_timestamps(
+                            segment_id, chunk.timestamps)
+                    else:
+                        pcm = chunk
+                    timeline.append_audio(pcm)
                     await send_audio(pcm)
             except asyncio.CancelledError:
+                timeline.finish_segment(segment_id, complete=False)
                 raise
             except Exception as e:                # 多半是听到一半关了页面，不是错误
+                timeline.finish_segment(segment_id, complete=False)
                 print(f"[web] 语音发送中断：{type(e).__name__}", flush=True)
                 break
+            else:
+                timeline.finish_segment(
+                    segment_id, complete=state["complete"])
 
     synther = asyncio.create_task(synth())
     speaker = asyncio.create_task(speak())
@@ -1450,26 +1480,33 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, said=None,
                 else (_NO_REPLAY_NOTE if _wants_sound(pending.text) else ""))
         if note:
             ctx = f"{ctx}\n\n{note}" if ctx else note
-        hist = _history_block(context_session, ACTIVE_SPACE)
+        hist = _history_block(context_session, context_space)
         if hist:
             ctx = f"{ctx}\n\n{hist}" if ctx else hist
         if _lang_note():
             ctx = f"{ctx}\n\n{_lang_note()}" if ctx else _lang_note()
-        async for d in vm.reply_stream(pending.text, ctx):
+        async for d in memory_vm.reply_stream(pending.text, ctx):
             reply += d
             buf += d
+            timeline.append_text(d)
             await send({"type": "answer_delta", "text": d})
             if _cut_point(buf, first=sent == 0):
-                await queue.put(buf.strip())
+                segment = buf.strip()
+                leading = len(buf) - len(buf.lstrip())
+                start = len(reply) - len(buf) + leading
+                await queue.put((segment, start, start + len(segment)))
                 buf, sent = "", sent + 1
         if buf.strip():
-            await queue.put(buf.strip())
+            segment = buf.strip()
+            leading = len(buf) - len(buf.lstrip())
+            start = len(reply) - len(buf) + leading
+            await queue.put((segment, start, start + len(segment)))
     except asyncio.CancelledError:
         interrupted = True                      # 用户插话了，这一轮到此为止
     finally:
         await queue.put(None)                   # 生成出错也要让 speak() 收工
 
-    def _drop_pipeline():
+    async def _drop_pipeline():
         # 别把 speak() 留在后台继续往一条已经停播的连接上发音频。
         # 提前起跑的那几段合成也要一起停，否则它们会继续占着远端 TTS 的队列，
         # 下一轮的第一句得排在这些没人要的音频后面——听起来就是打断之后更卡。
@@ -1477,9 +1514,11 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, said=None,
         synther.cancel()
         for t in synths:
             t.cancel()
+        await asyncio.gather(
+            speaker, synther, *synths, return_exceptions=True)
 
     if interrupted:
-        _drop_pipeline()
+        await _drop_pipeline()
     else:
         # 生成完了不等于说完了：音频还在一段段往外发，打断多半就落在这儿。
         # 不接住的话 CancelledError 会直接掀掉这个 Task，下面的存记忆一行都不跑，
@@ -1489,19 +1528,36 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, said=None,
             await speaker
         except asyncio.CancelledError:
             interrupted = True
-            _drop_pipeline()
+            await _drop_pipeline()
         else:
-            await send({"type": "answer_done"})
+            timeline.mark_generation_complete()
+            try:
+                await send({"type": "answer_done", "output_id": timeline.output_id})
+                timeout = max(2.0, min(
+                    60.0, timeline.sent_samples / timeline.sample_rate + 2.0))
+                await asyncio.wait_for(timeline.wait_playback_done(), timeout=timeout)
+            except asyncio.TimeoutError:
+                timeline.assume_drained()
+            except asyncio.CancelledError:
+                interrupted = True
+                await _drop_pipeline()
 
     # 记录本轮上下文；记忆写入放到后台，避免阻塞下一轮收音。
-    context_reply = ((said or {}).get("text") or reply) if interrupted else reply
+    context_reply = timeline.heard_text() if interrupted else reply
+    if interrupted and BARGE_DEBUG:
+        print(f"[context] 打断于 {timeline.rendered_ms()}ms，保留回复 "
+              f"{context_reply!r}", flush=True)
     history_turn_id = _push_history(
-        context_session, ACTIVE_SPACE, pending.text, context_reply)
-    queue_remember_turn(pending, context_reply, owner, history_turn_id)
+        context_session, context_space, pending.text, context_reply,
+        interrupted=interrupted)
+    queue_remember_turn(
+        pending, context_reply, owner, history_turn_id, memory_vm=memory_vm)
+    timeline.context_saved = True
 
 
 
-async def start_realtime_turn(pending, conn, send, context_session=""):
+async def start_realtime_turn(pending, conn, send, timeline,
+                              context_session="", context_space=""):
     """把预取好的记忆注入 Realtime session，触发这一轮的原生语音。
 
     只负责"发起"；收音频/文本和收尾都在常驻的事件泵里（见 realtime_session）——
@@ -1534,9 +1590,31 @@ async def start_realtime_turn(pending, conn, send, context_session=""):
                                                replay=bool(pending.replay),
                                                emotion=pending.emotion,
                                                text=pending.text,
-                                               context_session=context_session),
+                                               context_session=context_session,
+                                               context_space=context_space),
     })
-    await send({"type": "answer_start"})
+    await send({"type": "answer_start", "output_id": timeline.output_id,
+                "sample_rate": timeline.sample_rate})
+
+
+async def truncate_provider_output(conn, provider_item_id: str,
+                                   timeline: AudioTimeline) -> None:
+    truncate = getattr(conn, "truncate_output", None)
+    if callable(truncate):
+        await truncate(
+            provider_output_id=provider_item_id,
+            media_output_id=timeline.output_id,
+            audio_end_samples=timeline.rendered_cutoff_samples(),
+            sample_rate=timeline.sample_rate,
+        )
+        return
+    conversation = getattr(conn, "conversation", None)
+    item_api = getattr(conversation, "item", None)
+    truncate = getattr(item_api, "truncate", None)
+    if callable(truncate):
+        await truncate(
+            item_id=provider_item_id, content_index=0,
+            audio_end_ms=timeline.rendered_ms())
 
 
 async def _no_realtime(sock, err):
@@ -1654,8 +1732,8 @@ async def _remember_background(pending, reply: str, owner: dict,
 
 
 def queue_remember_turn(pending, reply: str, owner: dict,
-                        history_turn_id: str = "") -> None:
-    memory_vm = vm
+                        history_turn_id: str = "", memory_vm=None) -> None:
+    memory_vm = memory_vm or vm
     task = asyncio.create_task(
         _remember_background(pending, reply, owner, history_turn_id, memory_vm))
     _REMEMBER_TASKS.add(task)
@@ -1806,7 +1884,8 @@ def _lcs_len(a: str, b: str) -> int:
 
 
 async def anticipate(sock, on_frame=None, on_speech=None, owner=None, is_busy=None,
-                     said=None, on_candidate=None, on_candidate_reject=None):
+                     said=None, on_candidate=None, on_candidate_reject=None,
+                     on_playback_checkpoint=None):
     """驱动核心流式会话，逐个 yield 确认回合的 Pending。
     on_frame(raw24k)：realtime 用它把原始音频平行喂给 OpenAI（方案 A）。
     on_speech()：本地 VAD 一听到人声就叫一次——realtime 拿它做打断（barge-in）。
@@ -1834,6 +1913,10 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None, is_busy=No
             return
         if msg.get("text"):                                   # 打字轮
             data = json.loads(msg["text"])
+            if data.get("type") == "playback_checkpoint":
+                if on_playback_checkpoint:
+                    await on_playback_checkpoint(data)
+                continue
             if data.get("type") == "user_text" and data.get("text", "").strip():
                 stream.emotion = owner.get("emotion") or None
                 turn = await stream.feed_text(data["text"])
@@ -1994,11 +2077,13 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None, is_busy=No
 
 # ══════════════════ 每种 mode 的会话循环 ══════════════════
 
-async def _session_anticipate(session_id: str, sock, **kwargs):
+async def _session_anticipate(session_id: str, sock, on_close=None, **kwargs):
     try:
         async for pending in anticipate(sock, **kwargs):
             yield pending
     finally:
+        if on_close:
+            await on_close()
         _SESSION_CONTEXT.clear_session(session_id)
 
 
@@ -2015,8 +2100,10 @@ async def llm_tts_session(sock):
     现在回复丢进后台任务，读 socket 的循环一刻不停；听到人声就取消那个任务。
     """
     # until：前端预计几点才把已发出去的音频播完（见 hearing()）。
-    turn = {"task": None, "t0": 0.0, "until": 0.0, "reply": {"text": ""}}
+    turn = {"task": None, "t0": 0.0, "until": 0.0,
+            "reply": {"text": ""}, "timeline": None}
     owner = {"id": "", "last": "", "miss": 0}
+    speech_rate = SpeechRateEstimator()
     context_session = uuid.uuid4().hex
     candidate_paused = False
     candidate_paused_at = 0.0
@@ -2048,8 +2135,21 @@ async def llm_tts_session(sock):
         一个样本 2 字节。
         """
         t = turn["task"]
-        return (candidate_paused or (t is not None and not t.done())
+        timeline = turn["timeline"]
+        task_active = (t is not None and not t.done()
+                       and not (timeline and timeline.playback_done))
+        return (candidate_paused or task_active
                 or time.monotonic() < turn["until"])
+
+    async def playback_checkpoint(data):
+        timeline = turn["timeline"]
+        if timeline is None or data.get("output_id") != timeline.output_id:
+            return
+        timeline.update_checkpoint(
+            data.get("rendered_samples", 0), data.get("sample_rate", MIC_RATE),
+            data.get("state", "playing"))
+        if timeline.playback_done:
+            turn["until"] = 0.0
 
     async def send_audio(pcm: bytes):
         """发音频，顺带记账。前端是排队播的（pcm-player-worklet），这里跟着算
@@ -2075,20 +2175,45 @@ async def llm_tts_session(sock):
             left = max(0.0, turn["until"] - time.monotonic()) * 1000
             print(f"[barge] ★ 打断：转写触发（前端还剩 {left:.0f}ms 没播完）", flush=True)
         task = turn["task"]
+        timeline = turn["timeline"]
+        heard_text = timeline.heard_text() if timeline else ""
+        output_id = timeline.output_id if timeline else ""
+        if timeline:
+            timeline.mark_interrupted()
         if task is not None and not task.done():
             task.cancel()
         turn["task"], turn["until"] = None, 0.0
         candidate_paused = False
         candidate_paused_at = 0.0
         try:
-            await sock.send_json({"type": "answer_interrupt"})   # 前端停播已排队的音频
+            await sock.send_json({"type": "answer_interrupt",
+                                  "output_id": output_id,
+                                  "heard_text": heard_text})
         except Exception:
             pass
+        if task is not None and not task.done():
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    async def close_session():
+        task = turn["task"]
+        if task is None or task.done():
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"[web] 回复收尾失败：{type(e).__name__}: {e}", flush=True)
 
     async for pending in _session_anticipate(
             context_session, sock, on_speech=stop_reply, owner=owner,
             is_busy=hearing, said=lambda: turn["reply"]["text"],
-            on_candidate=pause_candidate, on_candidate_reject=resume_candidate):
+            on_candidate=pause_candidate, on_candidate_reject=resume_candidate,
+            on_playback_checkpoint=playback_checkpoint, on_close=close_session):
         # 整轮都是附和、而助手还在说：当没听见。
         #
         # _is_backchannel 原来只挡在"说到一半"那条路上（anticipate 里），可 VAD
@@ -2104,10 +2229,45 @@ async def llm_tts_session(sock):
         # 旧任务会继续往同一条 socket 里灌音频，两轮交织着播。
         await stop_reply(force=True)
         turn["t0"] = turn["until"] = 0.0
-        turn["reply"]["text"] = ""            # 新一轮，回声比对从空的开始
-        turn["task"] = asyncio.create_task(
-            voicemem_llm_tts(pending, sock.send_json, send_audio, owner,
-                             said=turn["reply"], context_session=context_session))
+        turn["reply"] = {"text": ""}            # 新一轮，回声比对从空的开始
+        reply_state = turn["reply"]
+        context_space = ACTIVE_SPACE
+        memory_vm = vm
+        timeline = AudioTimeline(
+            prebuffer_seconds=0.16, rate_estimator=speech_rate)
+        turn["timeline"] = timeline
+
+        async def run_reply(pending=pending, timeline=timeline,
+                            context_space=context_space, memory_vm=memory_vm,
+                            reply_state=reply_state):
+            try:
+                await voicemem_llm_tts(
+                    pending, sock.send_json, send_audio, owner, timeline,
+                    said=reply_state, context_session=context_session,
+                    context_space=context_space, memory_vm=memory_vm)
+            finally:
+                if not timeline.context_saved:
+                    reply = timeline.heard_text()
+                    history_turn_id = _push_history(
+                        context_session, context_space, pending.text, reply,
+                        interrupted=True)
+                    queue_remember_turn(
+                        pending, reply, owner, history_turn_id,
+                        memory_vm=memory_vm)
+                    timeline.context_saved = True
+
+        task = asyncio.create_task(run_reply())
+        turn["task"] = task
+
+        def reply_done(done_task):
+            try:
+                done_task.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                print(f"[web] 回复任务失败：{type(e).__name__}: {e}", flush=True)
+
+        task.add_done_callback(reply_done)
 
 
 async def realtime_session(sock):
@@ -2149,8 +2309,13 @@ async def realtime_session(sock):
             # 这一轮的状态：谁在说、说了什么、这轮用户的输入是什么。
             # until：前端预计几点才把已发出去的音频播完（见 hearing()）。
             turn = {"live": False, "reply": "", "pending": None,
-                    "t0": 0.0, "until": 0.0, "first": False}
+                    "t0": 0.0, "until": 0.0, "first": False,
+                    "timeline": None, "response_done": False,
+                    "provider_item_id": "", "space": "", "memory_vm": None}
             owner = {"id": "", "last": "", "miss": 0}
+            speech_rate = SpeechRateEstimator()
+            timelines: dict[str, AudioTimeline] = {}
+            playback_tasks: set[asyncio.Task] = set()
             candidate_paused = False
             candidate_paused_at = 0.0
             # Realtime 同一时刻只允许一个 response；取消完成后才能创建下一轮。
@@ -2167,7 +2332,10 @@ async def realtime_session(sock):
                 "打断没反应，它非要念完"。
                 所以按**已发出去的音频时长**算：24k PCM16，一个样本 2 字节。
                 """
-                return (candidate_paused or turn["live"]
+                timeline = turn["timeline"]
+                buffered = bool(timeline and not timeline.playback_done
+                                and time.monotonic() < turn["until"])
+                return (candidate_paused or turn["live"] or buffered
                         or time.monotonic() < turn["until"])
 
             async def pause_candidate():
@@ -2186,19 +2354,54 @@ async def realtime_session(sock):
                     candidate_paused_at = 0.0
                     await sock.send_json({"type": "answer_resume"})
 
-            def close_turn():
-                """一轮结束（说完或被打断）：把两半对话一起存。被打断时存的是用户
-                真正听到的那部分——跟 llm_tts 那边 capture() 的取舍一致。"""
+            def close_turn(interrupted=False):
                 p, reply = turn["pending"], turn["reply"]
-                turn.update(live=False, reply="", pending=None)
+                timeline = turn["timeline"]
+                space = turn["space"] or ACTIVE_SPACE
+                memory_vm = turn["memory_vm"] or vm
+                turn.update(live=False, reply="", pending=None, timeline=None,
+                            response_done=False, provider_item_id="",
+                            space="", memory_vm=None)
                 if p is None:
                     return
-                # 存记忆失败不能连累这条会话：close_turn 是在常驻事件泵里调的，
-                # 抛出去会打死那个 Task，而 Task 的异常没人 await 就被静默丢弃——
-                # 表现是"整个会话突然不响应了，日志里一个字都没有"。
+                if interrupted:
+                    reply = timeline.heard_text() if timeline else ""
+                    if BARGE_DEBUG and timeline:
+                        print(f"[context] 打断于 {timeline.rendered_ms()}ms，保留回复 "
+                              f"{reply!r}", flush=True)
                 history_turn_id = _push_history(
-                    context_session, ACTIVE_SPACE, p.text, reply)
-                queue_remember_turn(p, reply, owner, history_turn_id)
+                    context_session, space, p.text, reply,
+                    interrupted=interrupted)
+                queue_remember_turn(
+                    p, reply, owner, history_turn_id, memory_vm=memory_vm)
+                if timeline:
+                    timelines.pop(timeline.output_id, None)
+
+            async def playback_checkpoint(data):
+                timeline = timelines.get(str(data.get("output_id") or ""))
+                if timeline is None:
+                    return
+                timeline.update_checkpoint(
+                    data.get("rendered_samples", 0),
+                    data.get("sample_rate", MIC_RATE),
+                    data.get("state", "playing"))
+                if turn["timeline"] is timeline and timeline.playback_done:
+                    turn["until"] = 0.0
+                    if turn["response_done"]:
+                        close_turn(interrupted=False)
+
+            async def playback_fallback(timeline):
+                delay = max(0.0, turn["until"] - time.monotonic()) + 0.5
+                await asyncio.sleep(delay)
+                if turn["timeline"] is timeline and turn["response_done"]:
+                    timeline.assume_drained()
+                    turn["until"] = 0.0
+                    close_turn(interrupted=False)
+
+            def schedule_playback_fallback(timeline):
+                task = asyncio.create_task(playback_fallback(timeline))
+                playback_tasks.add(task)
+                task.add_done_callback(playback_tasks.discard)
 
             async def pump():
                 """常驻事件泵：OpenAI 的事件流只有这一个消费者。
@@ -2217,6 +2420,14 @@ async def realtime_session(sock):
                                 print(f"[lat] realtime 首帧 "
                                       f"{(time.monotonic()-turn['t0'])*1000:.0f}ms", flush=True)
                             pcm = base64.b64decode(ev.delta)
+                            timeline = turn["timeline"]
+                            if timeline:
+                                timeline.append_audio(pcm)
+                                timestamps = getattr(ev, "timestamps", ()) or ()
+                                if timestamps:
+                                    timeline.add_timestamps(tuple(timestamps))
+                            turn["provider_item_id"] = (
+                                getattr(ev, "item_id", "") or turn["provider_item_id"])
                             # 前端是排队播的（index.html 的 nextPlay），这里跟着算
                             # 同一条时间线：上一块播完之后再接这一块。
                             turn["until"] = (max(turn["until"], time.monotonic())
@@ -2225,6 +2436,14 @@ async def realtime_session(sock):
                     elif t.endswith("output_audio_transcript.delta"):
                         if turn["live"]:
                             turn["reply"] += ev.delta
+                            timeline = turn["timeline"]
+                            if timeline:
+                                timeline.append_text(ev.delta)
+                                timestamps = getattr(ev, "timestamps", ()) or ()
+                                if timestamps:
+                                    timeline.add_timestamps(tuple(timestamps))
+                            turn["provider_item_id"] = (
+                                getattr(ev, "item_id", "") or turn["provider_item_id"])
                             await sock.send_json({"type": "answer_delta", "text": ev.delta})
                     elif t == "error" or t.endswith(".error"):
                         err = getattr(ev, "error", None)
@@ -2266,8 +2485,41 @@ async def realtime_session(sock):
                         if BARGE_DEBUG and not turn["live"]:
                             print("[barge] 旧 Realtime response 已退出", flush=True)
                         if turn["live"]:
-                            await sock.send_json({"type": "answer_done"})
-                            close_turn()
+                            timeline = turn["timeline"]
+                            if timeline:
+                                timeline.mark_generation_complete()
+                            if t.endswith("response.cancelled"):
+                                response_idle.clear()
+                                heard = timeline.heard_text() if timeline else ""
+                                provider_item_id = turn["provider_item_id"]
+                                if timeline:
+                                    timeline.mark_interrupted()
+                                await sock.send_json({
+                                    "type": "answer_interrupt",
+                                    "output_id": timeline.output_id if timeline else "",
+                                    "heard_text": heard,
+                                })
+                                close_turn(interrupted=True)
+                                if provider_item_id and timeline:
+                                    try:
+                                        await truncate_provider_output(
+                                            conn, provider_item_id, timeline)
+                                    except Exception as e:
+                                        if BARGE_DEBUG:
+                                            print(f"[barge] Provider 上下文截断失败：{e}",
+                                                  flush=True)
+                                response_idle.set()
+                            else:
+                                turn["live"] = False
+                                turn["response_done"] = True
+                                await sock.send_json({
+                                    "type": "answer_done",
+                                    "output_id": timeline.output_id if timeline else "",
+                                })
+                                if timeline and timeline.playback_done:
+                                    close_turn(interrupted=False)
+                                elif timeline:
+                                    schedule_playback_fallback(timeline)
 
             async def on_frame(raw):
                 await conn.input_audio_buffer.append(audio=base64.b64encode(raw).decode())
@@ -2291,16 +2543,32 @@ async def realtime_session(sock):
                     print(f"[barge] ★ 打断：转写触发（前端还剩 {left:.0f}ms 没播完）",
                           flush=True)
                 active_response = not response_idle.is_set()
+                timeline = turn["timeline"]
+                heard_text = timeline.heard_text() if timeline else ""
+                output_id = timeline.output_id if timeline else ""
+                provider_item_id = turn["provider_item_id"]
+                if timeline:
+                    timeline.mark_interrupted()
                 turn["live"], turn["until"] = False, 0.0
                 candidate_paused = False
                 candidate_paused_at = 0.0
                 # 先通知前端停播——这是本地操作，立刻生效；而 response.cancel() 要
                 # 等一次 OpenAI 往返。之前顺序反了，人插话后还得听完那一个往返的
                 # 时间，听感就是"打断没用，他非要说完"。
-                await sock.send_json({"type": "answer_interrupt"})
-                close_turn()
+                await sock.send_json({"type": "answer_interrupt",
+                                      "output_id": output_id,
+                                      "heard_text": heard_text})
+                close_turn(interrupted=True)
                 if active_response:
                     await conn.response.cancel()
+                if provider_item_id and timeline:
+                    try:
+                        await truncate_provider_output(
+                            conn, provider_item_id, timeline)
+                    except Exception as e:
+                        if BARGE_DEBUG:
+                            print(f"[barge] Provider 上下文截断失败：{e}", flush=True)
+                if active_response:
                     try:
                         await asyncio.wait_for(response_idle.wait(), timeout=2.0)
                     except asyncio.TimeoutError:
@@ -2313,7 +2581,8 @@ async def realtime_session(sock):
                                                 on_speech=on_speech, owner=owner,
                                                 said=lambda: turn["reply"],
                                                 on_candidate=pause_candidate,
-                                                on_candidate_reject=resume_candidate):
+                                                on_candidate_reject=resume_candidate,
+                                                on_playback_checkpoint=playback_checkpoint):
                     # 跟 llm_tts 那条一致：整轮都是附和、助手还在说，就当没听见。
                     if _is_backchannel(pending.text) and hearing():
                         if BARGE_DEBUG:
@@ -2326,18 +2595,42 @@ async def realtime_session(sock):
                         if BARGE_DEBUG:
                             print("[barge] 等旧 response 退出后再创建下一轮", flush=True)
                         await response_idle.wait()
-                    turn.update(live=True, reply="", pending=pending,
-                                t0=time.monotonic(), until=0.0, first=False)
+                    context_space = ACTIVE_SPACE
+                    memory_vm = vm
+                    timeline = AudioTimeline(
+                        prebuffer_seconds=0.08, rate_estimator=speech_rate)
+                    timelines[timeline.output_id] = timeline
+                    turn.update(
+                        live=True, reply="", pending=pending,
+                        t0=time.monotonic(), until=0.0, first=False,
+                        timeline=timeline, response_done=False,
+                        provider_item_id="", space=context_space,
+                        memory_vm=memory_vm)
                     response_idle.clear()
                     try:
                         await start_realtime_turn(
-                            pending, conn, sock.send_json,
-                            context_session=context_session)
+                            pending, conn, sock.send_json, timeline,
+                            context_session=context_session,
+                            context_space=context_space)
                     except Exception:
                         response_idle.set()
                         raise
             finally:
                 pump_task.cancel()
+                try:
+                    await pump_task
+                except asyncio.CancelledError:
+                    pass
+                if turn["pending"] is not None:
+                    timeline = turn["timeline"]
+                    fully_played = bool(
+                        turn["response_done"] and timeline and timeline.playback_done)
+                    close_turn(interrupted=not fully_played)
+                for task in playback_tasks:
+                    task.cancel()
+                if playback_tasks:
+                    await asyncio.gather(
+                        *list(playback_tasks), return_exceptions=True)
     except Exception as e:
         if connected:
             raise

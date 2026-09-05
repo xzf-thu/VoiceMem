@@ -5,12 +5,7 @@ __pycache__/
 build/
 dist/
 .pytest_cache/
-# 本地草稿测试不进仓库，但按 README 两节写的那两个装包自检要进
-tests/*
-!tests/test_offline_engine.py
-!tests/test_streaming.py
-!tests/test_demo_from_zero.py
-!tests/test_session_context.py
+tests/
 
 # 运行时数据：记忆库、评测结果、录音归档
 results/

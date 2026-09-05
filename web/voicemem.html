@@ -1604,7 +1604,7 @@ let ws=null, live=false, paused=false;
 /* Continuous PCM playback with adaptive jitter buffering. */
 let playCtx=null, pcmNode=null, pcmReady=null, pcmPending=[], pcmDrainPending=false;
 let pcmStreaming=false, pcmDrainWaiters=[], pcmPrebuffer=0.08, pcmWorkletFailed=false;
-let pcmBargePaused=false;
+let pcmBargePaused=false, pcmOutputId='', pcmOutputSampleRate=SAMPLE_RATE;
 let scheduled=[], nextPlay=0;             // 只给“回放原始录音”这类完整 AudioBuffer 用
 
 function resolvePcmDrain(){
@@ -1614,6 +1614,24 @@ function resolvePcmDrain(){
 function configurePcmPlayer(){
   if(pcmNode) pcmNode.port.postMessage({type:'config',prebuffer:pcmPrebuffer});
 }
+function reportPlaybackCheckpoint(m){
+  if(!m.outputId||!ws||ws.readyState!==WebSocket.OPEN) return;
+  const state={buffer:'playing',started:'playing',resumed:'playing',
+               paused:'paused',underflow:'stalled',drained:'drained',
+               interrupted:'interrupted'}[m.type]||m.type;
+  try{
+    ws.send(JSON.stringify({type:'playback_checkpoint',output_id:m.outputId,
+      rendered_samples:Number(m.renderedSamples||0),sample_rate:Number(m.sampleRate||SAMPLE_RATE),
+      buffered_samples:Math.round(Number(m.bufferedMs||0)*Number(m.sampleRate||SAMPLE_RATE)/1000),
+      state}));
+  }catch(e){}
+}
+function beginPcmOutput(outputId,sampleRate=SAMPLE_RATE){
+  pcmOutputId=String(outputId||'');
+  pcmOutputSampleRate=Number(sampleRate||SAMPLE_RATE);
+  if(pcmNode) pcmNode.port.postMessage({type:'start',outputId:pcmOutputId,
+                                       sampleRate:pcmOutputSampleRate});
+}
 function initPcmPlayer(){
   if(pcmReady||!playCtx) return pcmReady;
   if(!playCtx.audioWorklet){ pcmWorkletFailed=true; return Promise.resolve(); }
@@ -1622,6 +1640,7 @@ function initPcmPlayer(){
     pcmNode.connect(playCtx.destination);
     pcmNode.port.onmessage=e=>{
       const m=e.data||{};
+      reportPlaybackCheckpoint(m);
       if(m.type==='started') setSpokenCaptionPlaying(true);
       else if(m.type==='drained'){
         setSpokenCaptionPlaying(false);
@@ -1632,13 +1651,15 @@ function initPcmPlayer(){
       }
     };
     configurePcmPlayer();
+    if(pcmOutputId) pcmNode.port.postMessage({type:'start',outputId:pcmOutputId,
+                                             sampleRate:pcmOutputSampleRate});
     if(pcmBargePaused) pcmNode.port.postMessage({type:'pause'});
-    for(const f32 of pcmPending.splice(0)) enqueuePcm(f32);
+    for(const item of pcmPending.splice(0)) enqueuePcm(item.samples,item.sourceFrames);
     if(pcmDrainPending){ pcmDrainPending=false; pcmNode.port.postMessage({type:'drain'}); }
   }).catch(e=>{
     pcmWorkletFailed=true; pcmReady=null;
     console.warn('[audio] AudioWorklet 不可用，回退到旧播放器',e);
-    for(const f32 of pcmPending.splice(0)) legacyPlayPcm(f32);
+    for(const item of pcmPending.splice(0)) legacyPlayPcm(item.samples);
     if(pcmDrainPending){ pcmDrainPending=false; resolvePcmDrain(); }
   });
   return pcmReady;
@@ -1659,9 +1680,9 @@ function legacyPlayPcm(f32){
   const now=playCtx.currentTime, at=nextPlay>now?nextPlay:now+pcmPrebuffer;
   s.start(at); nextPlay=at+b.duration;
 }
-function enqueuePcm(f32){
-  if(!pcmNode){ pcmPending.push(f32); return; }
-  pcmNode.port.postMessage({type:'audio',samples:f32},[f32.buffer]);
+function enqueuePcm(f32,sourceFrames){
+  if(!pcmNode){ pcmPending.push({samples:f32,sourceFrames}); return; }
+  pcmNode.port.postMessage({type:'audio',samples:f32,sourceFrames},[f32.buffer]);
 }
 function playPcm(buf){
   const ctx=ensurePlayback();
@@ -1672,7 +1693,7 @@ function playPcm(buf){
   // Match PCM samples to the AudioContext rate.
   const f32=ctx.sampleRate===SAMPLE_RATE?native:resampleLinear(native,SAMPLE_RATE,ctx.sampleRate);
   pcmStreaming=true;
-  if(pcmWorkletFailed) legacyPlayPcm(f32); else enqueuePcm(f32);
+  if(pcmWorkletFailed) legacyPlayPcm(f32); else enqueuePcm(f32,i16.length);
 }
 function finishPcmStream(){
   if(pcmWorkletFailed){ resolvePcmDrain(); return; }
@@ -1687,11 +1708,12 @@ function waitForPcmDrain(maxMs=20000){
     pcmDrainWaiters.push(finish);
   });
 }
-function stopPlayback(){
+function stopPlayback(reason='reset'){
   setSpokenCaptionPlaying(false);
   pcmBargePaused=false;
   pcmPending.length=0; pcmDrainPending=false;
-  if(pcmNode) pcmNode.port.postMessage({type:'clear'});
+  if(pcmNode) pcmNode.port.postMessage({type:'clear',reason});
+  pcmOutputId='';
   resolvePcmDrain();
   for(const s of scheduled.splice(0)){ try{ s.stop(); }catch(e){} }
   releaseMic();                 // 回放被打断，麦克风不该还被挂着
@@ -2065,7 +2087,8 @@ function handle(m){
       // 但那时旧音频早就发过来、正排在 playCtx 的调度队列里了——不清的话新一轮
       // 会接在它后面播，两段交织，听起来就是"语句不通顺"。
       // 提前合成下一段之后缓冲更深，这个问题也更明显。
-      stopPlayback();
+      stopPlayback('reset');
+      beginPcmOutput(m.output_id,m.sample_rate);
       replyPlaybackGeneration++;
       setVoice('ai'); aiSpeaking=true; liveReply=''; s.ui.reply=''; paint(s);
       beginLiveChatDraft(s);
@@ -2106,12 +2129,12 @@ function handle(m){
 
     case 'answer_interrupt':
       replyPlaybackGeneration++;
-      const heardReply=spokenCaption.shown;
+      const heardReply=typeof m.heard_text==='string'?m.heard_text:spokenCaption.shown;
       setSpokenCaptionPlaying(false);
       paintSpokenCaption(heardReply);
       finishLiveChatDraft(s,heardReply);
       liveReply='';
-      stopPlayback(); aiSpeaking=false; setVoice('user'); break;
+      stopPlayback('interrupted'); aiSpeaking=false; setVoice('user'); break;
 
     case 'tag_update': {
       // 声学情绪是后台算的（2.3 秒），算准了才补这一条。热路径上先发的是文本

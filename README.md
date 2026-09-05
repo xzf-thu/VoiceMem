@@ -247,6 +247,10 @@ ASR 文本确认后才清空队列并取消回复；附和、回声、无文字�
 播放。候选静音回退和最长等待时间可分别通过 `BARGE_REJECT_SILENCE_MS`、
 `BARGE_CANDIDATE_TIMEOUT_MS` 调整。
 
+两种回复模式共用以 PCM 样本位置为基准的输出时间轴。浏览器 AudioWorklet 回报
+实际渲染进度，打断时只把已经播放的回复写入 SessionBuffer。TTS 后端可选返回
+`TimedAudioChunk` 提供文字对齐；普通 PCM 后端按分段音频长度和动态语速估算。
+
 ## 🧠 VoiceMem：基于流式双脑架构的记忆系统
 
 **VoiceMem** 是一个面向实时语音智能体的记忆系统。
@@ -690,6 +694,11 @@ preserving the audio queue. An explicit stop command or stable ASR updates
 confirm cancellation; backchannels, echo, non-text sounds, and isolated
 syllables resume playback. `BARGE_REJECT_SILENCE_MS` and
 `BARGE_CANDIDATE_TIMEOUT_MS` configure rejection timing.
+
+Both reply modes share a PCM-sample media timeline. The browser AudioWorklet
+reports actual rendered progress, so interrupted context contains only the
+heard prefix. TTS providers may return `TimedAudioChunk` alignment metadata;
+plain PCM providers use segment duration and an adaptive speech-rate fallback.
 
 ## 🧠 VoiceMem: Memory with a Streaming Dual-Brain Architecture
 

@@ -11,6 +11,7 @@ class SessionTurn:
     turn_id: str
     user_text: str
     assistant_text: str
+    interrupted: bool = False
 
 
 class SessionBuffer:
@@ -27,12 +28,14 @@ class SessionBuffer:
         self._turn_context: dict[str, tuple[str, str]] = {}
         self._lock = threading.RLock()
 
-    def add(self, session_id: str, space: str, user_text: str, assistant_text: str) -> str:
+    def add(self, session_id: str, space: str, user_text: str, assistant_text: str,
+            interrupted: bool = False) -> str:
         turn_id = uuid.uuid4().hex
         turn = SessionTurn(
             turn_id=turn_id,
             user_text=(user_text or "").strip()[:self.text_limit],
             assistant_text=(assistant_text or "").strip()[:self.text_limit],
+            interrupted=bool(interrupted),
         )
         if not turn.user_text and not turn.assistant_text:
             return ""
@@ -69,7 +72,10 @@ class SessionBuffer:
             user_label, assistant_label = "用户", "你"
         for turn in turns:
             lines.append(f"{user_label}: {turn.user_text}")
-            lines.append(f"{assistant_label}: {turn.assistant_text}")
+            label = assistant_label
+            if turn.interrupted:
+                label += " (interrupted)" if language == "en" else "（被打断）"
+            lines.append(f"{label}: {turn.assistant_text}")
         return "\n".join(lines)
 
     def clear_session(self, session_id: str) -> None:
